@@ -83,7 +83,9 @@ A01: Broken Access Control | A02: Cryptographic Failures | A03: Injection | A04:
 
 ## Common Tools
 - **Playwright**: Browser automation, payload injection, evidence capture [`.claude/skills/pentest/attacks/essential-skills/playwright-automation.md`]
-- **Burp Suite**: Proxy, scanner, repeater, intruder, collaborator
+- **Burp Suite MCP**: Active scanning, Collaborator OOB, traffic replay via PortSwigger MCP [`.claude/skills/burp-suite/`]
+- **MobSF MCP**: Mobile static analysis (APK/IPA) via MobSF API [`.claude/skills/mobile-security/`]
+- **Frida MCP**: Dynamic instrumentation, hooking, runtime analysis [`.claude/skills/mobile-security/`]
 - **sqlmap**: `sqlmap -u "URL" -p param --dbs`
 - **nuclei**: `nuclei -u target -t cves/`
 - **ffuf**: `ffuf -u https://target/FUZZ -w wordlist.txt`
@@ -113,6 +115,11 @@ A01: Broken Access Control | A02: Cryptographic Failures | A03: Injection | A04:
 |-------|---------|
 | `/pentest` | Comprehensive penetration testing orchestration |
 | `/hackerone` | Bug bounty workflow automation (scope → testing → reporting) |
+| `/intigriti` | Intigriti bug bounty workflow automation (scope → testing → reporting) |
+| `/burp-suite` | Burp Suite integration (scanning, Collaborator, PoC replay) |
+| `/mobile-security` | Mobile app security (MobSF static + Frida dynamic analysis) |
+| `/cloud-security` | Cloud security assessment (AWS, Azure, GCP) |
+| `/container-security` | Container security (Docker, Kubernetes) |
 | `/authenticating` | Authentication security testing (signup, login, 2FA, CAPTCHA) |
 | `/ai-threat-testing` | LLM security testing (prompt injection, model extraction) |
 | `/common-appsec-patterns` | XSS, injection, client-side vulnerability testing |
