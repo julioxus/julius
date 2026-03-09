@@ -86,10 +86,11 @@ A01: Broken Access Control | A02: Cryptographic Failures | A03: Injection | A04:
 - **Burp Suite MCP**: Active scanning, Collaborator OOB, traffic replay via PortSwigger MCP [`.claude/skills/burp-suite/`]
 - **MobSF MCP**: Mobile static analysis (APK/IPA) via MobSF API [`.claude/skills/mobile-security/`]
 - **Frida MCP**: Dynamic instrumentation, hooking, runtime analysis [`.claude/skills/mobile-security/`]
-- **sqlmap**: `sqlmap -u "URL" -p param --dbs`
-- **nuclei**: `nuclei -u target -t cves/`
-- **ffuf**: `ffuf -u https://target/FUZZ -w wordlist.txt`
-- **nmap**: `nmap -sC -sV -oA output target`
+- **HexStrike AI MCP**: 150+ security tools via MCP (nmap, nuclei, sqlmap, gobuster, ghidra, prowler, etc.) + 12 AI agents for intelligent orchestration [`projects/pentest/.claude/skills/hexstrike/`]
+- **sqlmap**: `sqlmap -u "URL" -p param --dbs` | HexStrike: `sqlmap_scan(url, params)`
+- **nuclei**: `nuclei -u target -t cves/` | HexStrike: `nuclei_scan(target, templates)`
+- **ffuf**: `ffuf -u https://target/FUZZ -w wordlist.txt` | HexStrike: `ffuf_scan(url, wordlist)`
+- **nmap**: `nmap -sC -sV -oA output target` | HexStrike: `nmap_scan(target, options)`
 
 ---
 
@@ -125,6 +126,7 @@ A01: Broken Access Control | A02: Cryptographic Failures | A03: Injection | A04:
 | `/common-appsec-patterns` | XSS, injection, client-side vulnerability testing |
 | `/cve-testing` | CVE identification and exploitation |
 | `/domain-assessment` | Subdomain discovery & port scanning |
+| `/hexstrike` | HexStrike AI MCP - 150+ tools, 12 AI agents, automated workflows |
 | `/web-application-mapping` | Web app reconnaissance |
 
 ---
