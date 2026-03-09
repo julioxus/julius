@@ -94,19 +94,42 @@ A01: Broken Access Control | A02: Cryptographic Failures | A03: Injection | A04:
 
 ---
 
-## Reporting Requirements
+## Bug Bounty Reporting Policy (MANDATORY)
 
-**PoC Verification (CRITICAL)**: Vulnerability requires working PoC script
+### Gate: No PoC = No Report
+- **NEVER report theoretical/potential vulnerabilities** — every finding MUST have a working PoC demonstrating real exploitable impact
 - `poc.py` - Runnable exploit with args
 - `poc_output.txt` - Execution proof + timestamp
-- `workflow.md` - Manual steps if applicable
+- `workflow.md` - Manual reproduction steps
 - Evidence: Screenshots, videos, network logs
+- If you cannot demonstrate exploitation → **DROP the finding, do not report it**
+
+### Typically Out-of-Scope (Do NOT Report)
+These are almost universally excluded from bug bounty programs. Do not waste time testing or reporting them:
+- **CORS misconfigurations** — unless leading to actual data exfiltration with PoC
+- **Missing security headers** (X-Frame-Options, X-Content-Type-Options, CSP, etc.)
+- **Missing HSTS** / HSTS not on preload list
+- **Email spoofing** / missing SPF/DKIM/DMARC
+- **Clickjacking** on non-sensitive pages (no state-changing action)
+- **CSRF on logout** or non-sensitive forms
+- **Rate limiting** absence (login, API) — unless leading to account takeover with PoC
+- **Username/email enumeration** via login/register responses
+- **Self-XSS** (only affects the attacker's own session)
+- **HTTP 404/403 page content** / stack traces without sensitive data
+- **Version disclosure** / server banner information
+- **SSL/TLS configuration issues** (weak ciphers, certificate warnings)
+- **Open redirects** — unless chained with OAuth/SSO for token theft
+- **Best practice violations** without demonstrated security impact
+- **Denial of Service** (DoS/DDoS)
+- **Social engineering** / phishing
+- **Physical security** issues
+- **Vulnerabilities in out-of-scope assets** or third-party services
+
+### Reporting Quality Standard
+**Report Format**: Title | CVSS | CWE/OWASP | Reproduction steps | Impact | Remediation
+**Output Structure**: `outputs/<target>/findings/{finding-NNN/{poc.py, poc_output.txt, workflow.md}} + reports/{executive-summary.md, technical-report.md}`
 
 [Complete spec: `.claude/OUTPUT_STANDARDS.md` lines 258-357]
-
-**Report Format**: Title | CVSS | CWE/OWASP | Reproduction steps | Impact | Remediation
-
-**Output Structure**: `outputs/<target>/findings/{finding-NNN/{poc.py, poc_output.txt, workflow.md}} + reports/{executive-summary.md, technical-report.md}`
 
 ---
 
