@@ -177,6 +177,7 @@ All findings were independently discovered, verified, and validated by the resea
 | `/cve-testing` | CVE identification and exploitation |
 | `/domain-assessment` | Subdomain discovery & port scanning |
 | `/hexstrike` | HexStrike AI MCP - 150+ tools, 12 AI agents, automated workflows |
+| `/defectdojo` | DefectDojo vulnerability management (import findings, manage engagements) |
 | `/web-application-mapping` | Web app reconnaissance |
 
 ---
