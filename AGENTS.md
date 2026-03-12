@@ -125,6 +125,33 @@ These are almost universally excluded from bug bounty programs. Do not waste tim
 - **Physical security** issues
 - **Vulnerabilities in out-of-scope assets** or third-party services
 
+### AI Usage Compliance (MANDATORY)
+
+All bug bounty submissions that involve AI assistance MUST comply with platform code of conduct:
+
+**Pre-Submission Verification Checklist** (ALL must be TRUE before submitting):
+- [ ] **Personally verified**: Vulnerability was directly discovered, tested, and understood by the researcher — not blindly accepted from AI output
+- [ ] **Accuracy confirmed**: All technical details (endpoints, parameters, responses, versions) verified against the live target
+- [ ] **No fabricated content**: Zero invented endpoints, placeholder text, generic exploit templates, or references to non-existent features
+- [ ] **Understanding demonstrated**: Researcher can explain the root cause, impact, and fix without AI assistance
+- [ ] **AI disclosure included**: Submission contains transparent disclosure of how AI was used
+
+**AI Disclosure Section** (REQUIRED in every AI-assisted submission):
+```markdown
+## AI Assistance Disclosure
+AI tools were used in this submission for: [list specific uses, e.g., code analysis, report structuring, payload generation].
+All findings were independently discovered, verified, and validated by the researcher against the live target.
+```
+
+**Hard Gates** — Block submission if ANY of these are true:
+- Finding was generated entirely by AI without manual verification on the target
+- Report contains endpoints/parameters that don't exist on the target
+- PoC uses placeholder values (e.g., `example.com`, `CHANGE_ME`, `TODO`) instead of real target data
+- Researcher cannot explain the vulnerability's root cause when questioned
+- CVSS score is inflated beyond what the PoC actually demonstrates
+
+**Enforcement**: These checks apply in Phase 4 (Validation) and Phase 6 (Review) of all bug bounty workflows. Any finding that fails verification MUST be dropped — do not submit it.
+
 ### Reporting Quality Standard
 **Report Format**: Title | CVSS | CWE/OWASP | Reproduction steps | Impact | Remediation
 **Output Structure**: `outputs/<target>/findings/{finding-NNN/{poc.py, poc_output.txt, workflow.md}} + reports/{executive-summary.md, technical-report.md}`
