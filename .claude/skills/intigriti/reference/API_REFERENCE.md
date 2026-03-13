@@ -1,219 +1,129 @@
-# Intigriti API Reference
+# Intigriti Scope Input Reference
 
-## Authentication (MANDATORY)
+## Overview
 
-**All program and scope data MUST be fetched via this API. Never use hardcoded/manual scope.**
+**Intigriti does NOT provide a public researcher API.** All scope and program data must be obtained from the program page via PDF export, browser scraping, or manual input.
 
-**CRITICAL: Both headers are REQUIRED for every request.**
+## Scope Input Methods
 
-```
-Authorization: Bearer $INTIGRITI_TOKEN
-Content-Type: application/json
-```
+### Method 1: PDF Export (Recommended)
 
-### Environment Variable
+1. User exports/screenshots the Intigriti program page as PDF
+2. Read PDF to extract:
+   - **Assets table**: name, type (Device/iOS/Android/Web), tier (1-5)
+   - **Bounty table**: per-tier payout ranges by severity
+   - **Rules**: out-of-scope items, special instructions
+   - **Program metadata**: response SLAs, safe harbour status
 
-```bash
-export INTIGRITI_TOKEN=<your_bearer_token>
-```
+### Method 2: Browser Scraping
 
-### Token Validation
+1. User provides Intigriti program URL
+2. Use Playwright MCP or browser automation to load the page
+3. Extract the same data points as PDF method
+4. Parse HTML tables for structured data
 
-```bash
-# Returns 200 if token is valid
-curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer $INTIGRITI_TOKEN" \
-  -H "Content-Type: application/json" \
-  https://api.intigriti.com/external/researcher/v1/programs
-```
+### Method 3: Manual Input
 
-### Obtain Token
+1. Ask user for assets via AskUserQuestion
+2. Ask for program rules and exclusions
+3. Build scope from responses
 
-1. Go to: https://app.intigriti.com/researcher/settings/api
-2. Generate a new API token
-3. Set as env var: `export INTIGRITI_TOKEN=<token>`
+## Parsed Scope Format
 
-**If INTIGRITI_TOKEN is not set**: Always ask the user to provide it before proceeding.
+After extraction, scope should be structured as:
 
-## Base URL
-
-```
-https://api.intigriti.com/external/researcher/v1/
-```
-
-## Swagger Documentation
-
-```
-https://api.intigriti.com/external/researcher/swagger/index.html
-```
-
-## Key Endpoints
-
-### Programs
-
-**List Programs**
-```
-GET /external/researcher/v1/programs
-```
-
-Query params: `statusId`, `typeId`, `following`, `limit` (max 500), `offset`
-
-**Get Program Details (includes domains + rules)**
-```
-GET /external/researcher/v1/programs/{programId}
-```
-
-Response includes: description, rules, bounty table, domains (with tiers), severity ratings.
-Note: Program details embed `domains` and `rulesOfEngagement` in a single response.
-
-**Get Program Domains (Scope) - by version**
-```
-GET /external/researcher/v1/programs/{programId}/domains/{versionId}
-```
-
-Response format:
 ```json
-{
-  "domains": [
-    {
-      "id": "uuid",
-      "domain": "*.example.com",
-      "type": "web_application",
-      "tier": 1,
-      "description": "Main web application",
-      "inScope": true
-    },
-    {
-      "id": "uuid",
-      "domain": "api.example.com",
-      "type": "api",
-      "tier": 2,
-      "description": "REST API",
-      "inScope": true
-    }
-  ]
-}
-```
-
-### Submissions
-
-**Create Submission**
-```
-POST /external/researcher/v1/programs/{programId}/submission
-```
-
-Request body:
-```json
-{
-  "title": "Stored XSS in User Profile Bio",
-  "severity": {
-    "score": 7.1,
-    "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:L/I:L/A:N"
+[
+  {
+    "name": "Functions dealing with vehicle access and immobilizer",
+    "type": "device",
+    "tier": 1,
+    "description": "Vehicle security functions"
   },
-  "domainId": "uuid-of-in-scope-domain",
-  "vulnerabilityTypeId": "uuid-of-vuln-type",
-  "description": "Markdown description...",
-  "stepsToReproduce": "Numbered steps...",
-  "impact": "Impact description..."
+  {
+    "name": "1519034860",
+    "type": "ios",
+    "tier": 2,
+    "description": "iOS app (App Store ID)"
+  },
+  {
+    "name": "de.bmw.connected.mobile20.row",
+    "type": "android",
+    "tier": 2,
+    "description": "Android app (Play Store package)"
+  }
+]
+```
+
+## Mobile Asset Identification
+
+When parsing scope, identify mobile assets by:
+
+| Scope Type | Platform | Identifier Format |
+|------------|----------|-------------------|
+| iOS | Apple | App Store numeric ID (e.g., `1519034860`) |
+| Android | Google | Package name (e.g., `com.example.app`) |
+| Mobile | Either | Bundle ID or store URL |
+
+## Bounty Table Format
+
+```json
+{
+  "currency": "EUR",
+  "tiers": {
+    "1": {"low": 500, "medium": 2000, "high": 5000, "critical": 10000, "exceptional": 15000},
+    "2": {"low": 100, "medium": 500, "high": 1000, "critical": 2000, "exceptional": 5000}
+  }
 }
 ```
 
-**List My Submissions**
-```
-GET /external/researcher/v1/submissions
-```
+## Program Rules Extraction
 
-**Get Submission Details**
-```
-GET /external/researcher/v1/submissions/{submissionId}
-```
+Key fields to extract from program page:
+- **Policies**: community code, T&C, disclosure rules
+- **General rules**: testing constraints, product ownership requirements
+- **Out of scope**: excluded vulnerability types
+- **Response SLAs**: first response, triage, bounty, resolution times
+- **FAQ**: credentials, special instructions
+- **Safe harbour**: researcher protection status
 
-**Add Attachment to Submission**
-```
-POST /external/researcher/v1/submissions/{submissionId}/attachment
-Content-Type: multipart/form-data
-```
+## Vulnerability Type Taxonomy
 
-### Vulnerability Types
+Intigriti uses a dropdown taxonomy for vulnerability classification. Common types:
 
-**List Vulnerability Types**
-```
-GET /external/researcher/v1/vulnerability-types
-```
+### Web Application
+- Cross-Site Scripting (XSS) - Stored, Reflected, DOM
+- SQL Injection
+- Server-Side Request Forgery (SSRF)
+- Insecure Direct Object Reference (IDOR)
+- Authentication Bypass
+- Authorization Issues
+- Remote Code Execution (RCE)
+- Information Disclosure
+- Cross-Site Request Forgery (CSRF)
 
-Response includes taxonomy IDs needed for submission creation.
+### Mobile
+- Insecure Data Storage
+- Insecure Communication
+- Insufficient Cryptography
+- Client-Side Injection
+- Reverse Engineering
+- Code Tampering
 
-## Rate Limits
+### Infrastructure
+- Subdomain Takeover
+- Open Redirect (if chained)
+- DNS Misconfiguration
 
-- API requests: Follow standard rate limiting headers
-- `X-RateLimit-Limit`: Max requests per window
-- `X-RateLimit-Remaining`: Remaining requests
-- `Retry-After`: Wait time when rate limited
+## Submission Format
 
-## Error Responses
+Reports are submitted manually via the Intigriti web interface. Required fields:
 
-| Code | Description |
-|------|-------------|
-| 401 | Invalid or expired token |
-| 403 | Insufficient permissions |
-| 404 | Program/submission not found |
-| 422 | Validation error (check field requirements) |
-| 429 | Rate limited |
-
-## Common Patterns
-
-### Fetch Scope for Testing (Preferred: use scope_parser.py)
-
-```bash
-# Recommended: use the scope_parser tool
-python tools/scope_parser.py --api <program_id>
-```
-
-```python
-# Or programmatically:
-import os
-import requests
-
-token = os.environ.get("INTIGRITI_TOKEN")
-if not token:
-    raise RuntimeError("INTIGRITI_TOKEN not set. Ask user for token.")
-
-headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-base = "https://api.intigriti.com/external/researcher/v1"
-
-# Get program domains
-resp = requests.get(f"{base}/program/{program_id}/domain", headers=headers)
-resp.raise_for_status()
-domains = resp.json()["domains"]
-
-# Filter in-scope, sort by tier
-in_scope = [d for d in domains if d["inScope"]]
-in_scope.sort(key=lambda d: d["tier"])
-```
-
-### Submit Finding
-
-```python
-import os
-import requests
-
-token = os.environ.get("INTIGRITI_TOKEN")
-if not token:
-    raise RuntimeError("INTIGRITI_TOKEN not set. Ask user for token.")
-
-headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-base = "https://api.intigriti.com/external/researcher/v1"
-
-submission = {
-    "title": "SSRF via Image URL Parameter",
-    "severity": {"score": 8.6, "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N"},
-    "domainId": domain_id,
-    "vulnerabilityTypeId": vuln_type_id,
-    "description": "...",
-    "stepsToReproduce": "...",
-    "impact": "..."
-}
-resp = requests.post(f"{base}/program/{program_id}/submission",
-                     headers=headers, json=submission)
-resp.raise_for_status()
-```
+1. **Title**: Vulnerability description (NO URL in title)
+2. **Severity**: CVSS v3.1 or v4.0 vector + score
+3. **Domain**: Select affected in-scope asset
+4. **Vulnerability Type**: Select from taxonomy dropdown
+5. **Description**: Markdown, detailed explanation
+6. **Steps to Reproduce**: Numbered, clear steps
+7. **Impact**: Realistic attack scenario
+8. **Attachments**: PoC files, screenshots, videos
