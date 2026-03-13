@@ -1,150 +1,62 @@
 """
 Intigriti Scope Parser
 
-Fetches and parses Intigriti domain-based scope from the API.
-Always uses the Intigriti API for scope retrieval - never hardcoded data.
+Parses Intigriti program scope from structured data (JSON files, dicts).
+Scope is extracted from program pages (PDF, URL, manual input) - Intigriti
+does not provide a public researcher API.
 
-Requires INTIGRITI_TOKEN environment variable to be set.
+Usage:
+    python scope_parser.py <scope.json>
 """
 
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import List, Dict, Optional
 
-API_BASE = "https://api.intigriti.com/external/researcher/v1"
 
-
-def get_token() -> str:
+def parse_scope(assets: List[Dict[str, any]]) -> List[Dict[str, any]]:
     """
-    Get the Intigriti API token from environment.
-
-    Raises:
-        SystemExit: If INTIGRITI_TOKEN is not set.
-    """
-    token = os.environ.get("INTIGRITI_TOKEN", "").strip()
-    if not token:
-        print("ERROR: INTIGRITI_TOKEN environment variable is not set.")
-        print("Set it with: export INTIGRITI_TOKEN=<your_bearer_token>")
-        print("Generate a token at: https://app.intigriti.com/researcher/settings/api")
-        sys.exit(1)
-    return token
-
-
-def api_request(endpoint: str, token: Optional[str] = None) -> dict:
-    """
-    Make an authenticated GET request to the Intigriti API using curl.
+    Parse and normalize Intigriti program scope from a list of assets.
 
     Args:
-        endpoint: API path (appended to base URL)
-        token: Bearer token (reads from env if not provided)
+        assets: List of asset dicts with keys: name, type, tier, description (optional)
 
     Returns:
-        Parsed JSON response
-
-    Raises:
-        SystemExit: If token is missing or request fails.
+        List of normalized asset dicts sorted by tier (1=highest priority)
     """
-    if token is None:
-        token = get_token()
+    parsed = []
 
-    url = f"{API_BASE}/{endpoint.lstrip('/')}"
-    result = subprocess.run(
-        ["curl", "-s", "-w", "\n%{http_code}", "-H", f"Authorization: Bearer {token}", "-H", "Content-Type: application/json", url],
-        capture_output=True, text=True, timeout=30
-    )
-
-    lines = result.stdout.strip().rsplit("\n", 1)
-    if len(lines) != 2:
-        print(f"ERROR: Unexpected API response from {url}")
-        sys.exit(1)
-
-    body, status_code = lines[0], lines[1]
-
-    if status_code == "401" or status_code == "403":
-        print(f"ERROR: Authentication failed (HTTP {status_code}). Token may be invalid or expired.")
-        print("Generate a new token at: https://app.intigriti.com/researcher/settings/api")
-        sys.exit(1)
-
-    if not status_code.startswith("2"):
-        print(f"ERROR: API request failed with HTTP {status_code}: {body[:200]}")
-        sys.exit(1)
-
-    return json.loads(body)
-
-
-def fetch_program_scope(program_id: str, token: Optional[str] = None) -> List[Dict[str, any]]:
-    """
-    Fetch and parse program scope directly from the Intigriti API.
-
-    Args:
-        program_id: Intigriti program UUID
-        token: Bearer token (reads from env if not provided)
-
-    Returns:
-        List of in-scope domain dicts sorted by tier
-    """
-    data = api_request(f"program/{program_id}/domain", token)
-    return parse_scope(data)
-
-
-def fetch_program_details(program_id: str, token: Optional[str] = None) -> dict:
-    """
-    Fetch program details (rules, bounty table, etc.) from the API.
-
-    Args:
-        program_id: Intigriti program UUID
-        token: Bearer token (reads from env if not provided)
-
-    Returns:
-        Program details dict
-    """
-    return api_request(f"program/{program_id}", token)
-
-
-def parse_scope(data: dict) -> List[Dict[str, any]]:
-    """
-    Parse Intigriti program scope from API response.
-
-    Args:
-        data: JSON response from GET /core/researcher/program/{id}/domain
-
-    Returns:
-        List of in-scope domain dicts sorted by tier (1=highest priority)
-    """
-    domains = data.get("domains", [])
-    in_scope = []
-
-    for domain in domains:
-        if not domain.get("inScope", False):
-            continue
-
-        asset = {
-            "id": domain.get("id", ""),
-            "domain": domain.get("domain", "").strip(),
-            "type": domain.get("type", "web_application").strip(),
-            "tier": domain.get("tier", 5),
-            "description": domain.get("description", "").strip(),
+    for asset in assets:
+        entry = {
+            "name": asset.get("name", asset.get("domain", "")).strip(),
+            "type": asset.get("type", "web_application").strip().lower(),
+            "tier": int(asset.get("tier", 5)),
+            "description": asset.get("description", "").strip(),
         }
 
-        if not asset["domain"]:
+        if not entry["name"]:
             continue
 
-        in_scope.append(asset)
+        parsed.append(entry)
 
     # Sort by tier (1 = highest priority)
-    in_scope.sort(key=lambda d: d["tier"])
-    return in_scope
+    parsed.sort(key=lambda d: d["tier"])
+    return parsed
 
 
 def parse_scope_file(json_path: str) -> List[Dict[str, any]]:
     """
     Parse scope from a saved JSON file.
 
+    Expected format:
+    [
+        {"name": "*.example.com", "type": "web_application", "tier": 1, "description": "Main app"},
+        {"name": "com.example.app", "type": "android", "tier": 2, "description": "Mobile app"}
+    ]
+
     Args:
-        json_path: Path to JSON file with API response
+        json_path: Path to JSON file with scope data
     """
     path = Path(json_path)
     if not path.exists():
@@ -153,7 +65,29 @@ def parse_scope_file(json_path: str) -> List[Dict[str, any]]:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    return parse_scope(data)
+    # Support both list format and dict with "assets" key
+    if isinstance(data, dict):
+        assets = data.get("assets", data.get("domains", data.get("scope", [])))
+    else:
+        assets = data
+
+    return parse_scope(assets)
+
+
+def is_mobile_asset(asset: Dict[str, any]) -> bool:
+    """Check if an asset is a mobile app (iOS or Android)."""
+    asset_type = asset.get("type", "").lower()
+    return asset_type in ("ios", "android", "mobile")
+
+
+def get_mobile_assets(assets: List[Dict[str, any]]) -> List[Dict[str, any]]:
+    """Filter and return only mobile assets from scope."""
+    return [a for a in assets if is_mobile_asset(a)]
+
+
+def get_web_assets(assets: List[Dict[str, any]]) -> List[Dict[str, any]]:
+    """Filter and return non-mobile assets from scope."""
+    return [a for a in assets if not is_mobile_asset(a)]
 
 
 def generate_summary(assets: List[Dict[str, any]]) -> str:
@@ -168,7 +102,7 @@ def generate_summary(assets: List[Dict[str, any]]) -> str:
         atype = asset["type"]
         by_type[atype] = by_type.get(atype, 0) + 1
 
-    summary = f"Total in-scope domains: {total}\n\nBy tier:\n"
+    summary = f"Total in-scope assets: {total}\n\nBy tier:\n"
     for tier in sorted(by_tier.keys()):
         summary += f"  Tier {tier}: {by_tier[tier]}\n"
 
@@ -176,27 +110,25 @@ def generate_summary(assets: List[Dict[str, any]]) -> str:
     for atype, count in sorted(by_type.items()):
         summary += f"  {atype}: {count}\n"
 
+    mobile = get_mobile_assets(assets)
+    if mobile:
+        summary += f"\nMobile apps ({len(mobile)}):\n"
+        for app in mobile:
+            summary += f"  [{app['type'].upper()}] {app['name']} (Tier {app['tier']})\n"
+
     return summary
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  python scope_parser.py --api <program_id>   # Fetch from API (recommended)")
-        print("  python scope_parser.py <scope.json>          # Parse local file")
+        print("  python scope_parser.py <scope.json>   # Parse scope from JSON file")
+        print()
+        print("JSON format: list of {name, type, tier, description}")
         sys.exit(1)
 
     try:
-        if sys.argv[1] == "--api":
-            if len(sys.argv) < 3:
-                print("ERROR: Program ID required. Usage: python scope_parser.py --api <program_id>")
-                sys.exit(1)
-            program_id = sys.argv[2]
-            print(f"Fetching scope from Intigriti API for program: {program_id}")
-            assets = fetch_program_scope(program_id)
-        else:
-            assets = parse_scope_file(sys.argv[1])
-
+        assets = parse_scope_file(sys.argv[1])
         print(generate_summary(assets))
     except Exception as e:
         print(f"Error: {e}")
