@@ -77,9 +77,10 @@ python tools/iap_browser_auth.py --clear
 - [ ] Identify product and engagement (search existing via API)
 - [ ] **If product/engagement need to be created → AskUserQuestion for approval first**
 - [ ] Scan outputs/{engagement}/findings/ for validated findings
+- [ ] **Verify real impact for EVERY finding** — reproduce with working PoC against a live/local instance, capture evidence. No PoC = No import. Same standard as bug bounty programs.
 - [ ] Map vulnerability types → CWE IDs (reference/CWE_MAPPING.md)
 - [ ] Deduplicate against existing findings
-- [ ] **Present findings summary table to user (title, severity, CWE)**
+- [ ] **Present findings summary table to user (title, severity, CWE, PoC status)**
 - [ ] **AskUserQuestion: get explicit approval before importing**
 - [ ] Create/find test "Manual Review" (type "Manual Code Review") in engagement via /api/v2/tests/
 - [ ] Import ONLY approved findings via POST /api/v2/findings/ (linked to the Manual Review test)
@@ -168,7 +169,7 @@ outputs/defectdojo-{product}/
 **NEVER**:
 - **Proceed without validated API credentials**
 - **Create or modify ANY resource in DefectDojo (product, engagement, test, finding) without explicit user approval first**
-- **Import findings without validated PoC**
+- **Import findings without validated PoC** — every finding MUST have a working proof-of-concept reproduced against a live/local instance with captured evidence, same standard as bug bounty programs
 - Import fabricated or placeholder findings
 - Overwrite existing findings without user approval
 - Skip deduplication
