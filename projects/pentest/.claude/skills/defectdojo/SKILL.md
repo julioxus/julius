@@ -74,13 +74,15 @@ python tools/iap_browser_auth.py --clear
 **Option 1: Import from Pentest Engagement**
 ```
 - [ ] Validate API credentials (mandatory)
-- [ ] Identify/create product and engagement
+- [ ] Identify product and engagement (search existing via API)
+- [ ] **If product/engagement need to be created → AskUserQuestion for approval first**
 - [ ] Scan outputs/{engagement}/findings/ for validated findings
 - [ ] Map vulnerability types → CWE IDs (reference/CWE_MAPPING.md)
 - [ ] Deduplicate against existing findings
 - [ ] **Present findings summary table to user (title, severity, CWE)**
 - [ ] **AskUserQuestion: get explicit approval before importing**
-- [ ] Import ONLY approved findings via POST /api/v2/findings/
+- [ ] Create/find test "Manual Review" (type "Manual Code Review") in engagement via /api/v2/tests/
+- [ ] Import ONLY approved findings via POST /api/v2/findings/ (linked to the Manual Review test)
 - [ ] Upload evidence (screenshots, PoCs, HTTP logs)
 - [ ] Verify and present summary
 ```
@@ -88,7 +90,8 @@ python tools/iap_browser_auth.py --clear
 **Option 2: Import from Scanner Output**
 ```
 - [ ] Validate API credentials (mandatory)
-- [ ] Identify/create product and engagement
+- [ ] Identify product and engagement (search existing via API)
+- [ ] **If product/engagement need to be created → AskUserQuestion for approval first**
 - [ ] Detect scanner format and show user what will be imported
 - [ ] **AskUserQuestion: get explicit approval before importing scan**
 - [ ] Use reimport endpoint for supported formats:
@@ -101,7 +104,8 @@ python tools/iap_browser_auth.py --clear
 ```
 - [ ] Validate API credentials (mandatory)
 - [ ] Read findings from outputs/hackerone-* or outputs/intigriti-*
-- [ ] Create product per program, engagement per campaign
+- [ ] **AskUserQuestion: confirm product/engagement creation before proceeding**
+- [ ] Create product per program, engagement per campaign (only after approval)
 - [ ] **Present all findings to user for review**
 - [ ] **AskUserQuestion: get explicit approval before importing**
 - [ ] Import ONLY approved findings with platform-specific metadata as notes
@@ -155,6 +159,7 @@ outputs/defectdojo-{product}/
 **MUST DO**:
 - **Validate DEFECTDOJO_URL + DEFECTDOJO_TOKEN before any operation**
 - **ASK USER APPROVAL BEFORE UPLOADING EACH FINDING** — present a summary table of all findings (title, severity, CWE) and use AskUserQuestion to get explicit confirmation before importing. NEVER auto-import findings without user consent.
+- **CREATE FINDINGS UNDER A TEST** — always create/find a test named "Manual Review" with test type "Manual Code Review" in the engagement, then link all findings to that test ID.
 - Map CWE IDs accurately (reference/CWE_MAPPING.md)
 - Deduplicate against existing findings
 - Upload all evidence files
@@ -162,7 +167,7 @@ outputs/defectdojo-{product}/
 
 **NEVER**:
 - **Proceed without validated API credentials**
-- **Upload ANY finding to DefectDojo without explicit user approval first**
+- **Create or modify ANY resource in DefectDojo (product, engagement, test, finding) without explicit user approval first**
 - **Import findings without validated PoC**
 - Import fabricated or placeholder findings
 - Overwrite existing findings without user approval
