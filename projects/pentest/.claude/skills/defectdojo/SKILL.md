@@ -78,6 +78,7 @@ python tools/iap_browser_auth.py --clear
 - [ ] **If product/engagement need to be created → AskUserQuestion for approval first**
 - [ ] Scan outputs/{engagement}/findings/ for validated findings
 - [ ] **Verify real impact for EVERY finding** — reproduce with working PoC against a live/local instance, capture evidence. No PoC = No import. Same standard as bug bounty programs.
+- [ ] **Format each finding per DefectDojo schema** — title, CWE, CVSS vector+score, endpoint, description, impact, steps_to_reproduce, mitigation (see Finding Format section). All fields mandatory.
 - [ ] Map vulnerability types → CWE IDs (reference/CWE_MAPPING.md)
 - [ ] Deduplicate against existing findings
 - [ ] **Present findings summary table to user (title, severity, CWE, PoC status)**
@@ -113,21 +114,23 @@ python tools/iap_browser_auth.py --clear
 - [ ] Upload submission reports as evidence
 ```
 
-## Finding Mapping
+## Finding Format (MANDATORY)
 
-| Local Field | DefectDojo Field | Notes |
-|-------------|-----------------|-------|
-| Title | title | `[VulnType] in [Component]` |
-| Severity | severity | Critical/High/Medium/Low/Info |
-| CVSS vector | cvssv3 | Full CVSS:3.1 vector string |
-| Description | description | Markdown supported |
-| Remediation | mitigation | Actionable fixes |
-| Impact | impact | Business impact |
-| Steps | steps_to_reproduce | Numbered steps |
-| CWE | cwe | Integer ID (see CWE_MAPPING.md) |
-| URL | endpoints | Create endpoint objects first |
-| poc.py | file upload | Attach to finding |
-| screenshots | file upload | Attach to finding |
+Every finding MUST include ALL of these fields before import. Missing fields = do not import.
+
+| Field | DefectDojo API field | Format | Required |
+|-------|---------------------|--------|----------|
+| **Title** | `title` | `[CWE-XXX] Short description` | YES |
+| **CWE** | `cwe` | Integer ID (see reference/CWE_MAPPING.md) | YES |
+| **CVSS Vector** | `cvssv3` | Full `CVSS:3.1/AV:.../...` string | YES |
+| **CVSS Score** | `cvssv3_score` | Numeric (0.0-10.0), derived from vector | YES |
+| **Severity** | `severity` | Critical/High/Medium/Low/Info (match CVSS) | YES |
+| **Endpoint** | `endpoints` | Affected URL/path/component | YES |
+| **Description** | `description` | Technical explanation of the vulnerability | YES |
+| **Impact** | `impact` | Real business impact (verified, not theoretical) | YES |
+| **Steps to Reproduce** | `steps_to_reproduce` | Numbered steps with exact commands/requests | YES |
+| **Mitigation** | `mitigation` | Actionable remediation guidance | YES |
+| **Evidence** | file upload | Screenshots, PoC scripts, HTTP logs | YES |
 
 ## Engagement Types
 
