@@ -1,11 +1,11 @@
 ---
 name: hackerone
-description: HackerOne bug bounty automation - parses scope CSVs, deploys parallel pentesting agents for each asset, validates PoCs, and generates platform-ready submission reports. Use when testing HackerOne programs or preparing professional vulnerability submissions.
+description: HackerOne bug bounty automation - parses scope CSVs, deploys parallel pentesting agents for each asset, auto-downloads mobile apps from running emulators, validates PoCs, and generates platform-ready submission reports. Use when testing HackerOne programs or preparing professional vulnerability submissions.
 ---
 
 # HackerOne Bug Bounty Hunting
 
-Automates HackerOne workflows: scope parsing → parallel testing → PoC validation → submission reports.
+Automates HackerOne workflows: scope parsing → mobile app acquisition → parallel testing → PoC validation → submission reports.
 
 ## Quick Start
 
@@ -49,6 +49,79 @@ Expected columns:
 
 Use `tools/csv_parser.py` to parse.
 
+## Mobile App Acquisition (AUTOMATIC)
+
+**When iOS or Android assets appear in scope, automatically download them from running emulators.**
+
+### Detection: Find Running Emulators
+
+```bash
+# Android emulators
+adb devices | grep -E "emulator|device$"
+
+# iOS simulators
+xcrun simctl list devices booted
+```
+
+### Android App Download
+
+```bash
+# 1. Identify target package from scope CSV (asset_type contains GOOGLE_PLAY_APP_ID or similar)
+PACKAGE="<package_id_from_scope>"
+
+# 2. Open Play Store on the emulator to install
+adb shell am start -a android.intent.action.VIEW -d "market://details?id=${PACKAGE}"
+
+# 3. Wait for user to complete install, then verify
+adb shell pm list packages | grep "${PACKAGE}"
+
+# 4. Pull APK for static analysis
+APK_PATH=$(adb shell pm path "${PACKAGE}" | sed 's/package://')
+adb pull "${APK_PATH}" "./outputs/apps/${PACKAGE}.apk"
+
+# 5. If multiple splits (split APKs), pull all
+adb shell pm path "${PACKAGE}" | while read -r line; do
+  path=$(echo "$line" | sed 's/package://')
+  filename=$(basename "$path")
+  adb pull "$path" "./outputs/apps/${filename}"
+done
+```
+
+### iOS App Download
+
+```bash
+# 1. Identify App Store ID from scope
+APP_ID="<appstore_id_from_scope>"
+
+# 2. Get booted simulator UDID
+UDID=$(xcrun simctl list devices booted -j | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for runtime, devices in data['devices'].items():
+    for d in devices:
+        if d['state'] == 'Booted':
+            print(d['udid']); break
+")
+
+# 3. Open App Store on simulator
+xcrun simctl openurl "${UDID}" "itms-apps://apps.apple.com/app/id${APP_ID}"
+
+# 4. Alternative: use ipatool if available for direct IPA download
+ipatool download -b "<bundle_id>" -o "./outputs/apps/"
+
+# 5. For real devices connected via USB
+ideviceinstaller -l | grep "<bundle_id>"
+```
+
+### Post-Download Analysis
+
+```
+- [ ] Static analysis with MobSF (if /mobile-security skill available)
+- [ ] Extract AndroidManifest.xml / Info.plist
+- [ ] Identify API endpoints, hardcoded secrets, certificate pinning
+- [ ] Feed discovered endpoints back to web/API Pentester agents
+```
+
 ## Agent Deployment
 
 **Pentester Agent** per asset:
@@ -56,11 +129,14 @@ Use `tools/csv_parser.py` to parse.
 - Tests all vulnerability types
 - Returns validated findings with PoCs
 
+**Mobile assets**: Deploy `/mobile-security` skill agents after app download
+
 **Parallel Execution**:
 - 10 assets = 10 Pentester agents
 - Each spawns 30+ specialized agents
 - Total: 300+ concurrent tests
 - Time: 2-4 hours vs 20-40 sequential
+- Mobile app analysis runs alongside web testing
 
 ## PoC Validation (CRITICAL)
 
@@ -90,6 +166,9 @@ Per OUTPUT.md - Bug Bounty format:
 
 ```
 outputs/<program>/
+├── apps/                         # Downloaded mobile apps
+│   ├── <package>.apk
+│   └── <bundle>.ipa
 ├── findings/
 │   ├── finding-001/
 │   │   ├── report.md           # HackerOne report
@@ -127,12 +206,41 @@ outputs/<program>/
 - Test only `eligible_for_submission=true` assets
 - Follow program-specific guidelines
 - Generate CVSS scores
+- **Auto-download mobile apps** from running emulators when iOS/Android assets are in scope
 
 **NEVER**:
 - Report without validated PoC
 - Test out-of-scope assets
 - Include real user data
 - Cause service disruption
+- Skip mobile app download when emulators are available and mobile assets are in scope
+
+## AI Usage Compliance (MANDATORY)
+
+Both HackerOne and Intigriti permit AI tools but require responsible use. **Every report MUST comply:**
+
+1. **AI Disclosure**: Add a section at the end of every report:
+   ```
+   ## AI Disclosure
+   AI tools (Claude Code) were used to assist with [specific tasks: static analysis, script generation,
+   report structuring, etc.]. The vulnerability was identified by the researcher through [method].
+   All [evidence type] was [how it was obtained]. [What was NOT tested and why].
+   ```
+
+2. **No fabricated content**: NEVER include invented endpoints, placeholder URLs, generic exploit templates, or references to features/behaviors that were not actually observed in the target.
+
+3. **All claims verified**: Every code snippet, logcat line, HTTP response, and technical detail MUST come from actual testing or analysis. If a code snippet is from decompiled source, say so. If logcat is from an emulator, say so with timestamp.
+
+4. **Methodology transparency**: Clearly distinguish between:
+   - Runtime-verified (executed on device/emulator with real output)
+   - Static analysis (found in decompiled/source code but not triggered at runtime)
+   - Inferred (reasonable conclusion based on code patterns but not directly confirmed)
+
+5. **Honest CVSS & impact**: Score only confirmed impact. State mitigations and caveats upfront. Never present theoretical worst-case as confirmed impact.
+
+6. **No unverified escalation**: Don't claim "full account takeover" if only information leakage was demonstrated. Don't claim "remote code execution" from a code pattern without runtime proof.
+
+**Reports that violate these rules will be closed without response and may lead to platform removal.**
 
 ## Quality Checklist
 
@@ -144,12 +252,17 @@ Before submission:
 - [ ] Impact analysis
 - [ ] Remediation guidance
 - [ ] Sensitive data sanitized
+- [ ] **AI Disclosure section included**
+- [ ] **All technical claims verified against real evidence**
+- [ ] **No fabricated endpoints, placeholders, or generic templates**
+- [ ] **Methodology (runtime vs static vs inferred) clearly stated**
 
 ## Tools
 
 - `tools/csv_parser.py` - Parse HackerOne scope CSVs
 - `tools/report_validator.py` - Validate report completeness
 - `/pentest` skill - Core testing functionality
+- `/mobile-security` skill - Mobile app analysis
 - Pentester agent - Orchestrates testing
 
 ## Integration
