@@ -120,11 +120,11 @@ Every finding MUST include ALL of these fields before import. Missing fields = d
 
 | Field | DefectDojo API field | Format | Required |
 |-------|---------------------|--------|----------|
-| **Title** | `title` | `[CWE-XXX] Short description` | YES |
+| **Title** | `title` | `Short description` (no CWE prefix) | YES |
 | **CWE** | `cwe` | Integer ID (see reference/CWE_MAPPING.md) | YES |
 | **CVSS Vector** | `cvssv3` | Full `CVSS:3.1/AV:.../...` string | YES |
 | **CVSS Score** | `cvssv3_score` | Numeric (0.0-10.0), derived from vector | YES |
-| **Severity** | `severity` | Critical/High/Medium/Low/Info (match CVSS) | YES |
+| **Severity** | `severity` | Critical(9.0-10.0)/High(7.0-8.9)/Medium(4.0-6.9)/Low(0.1-3.9)/Info(0.0) — MUST match CVSS score, never override manually | YES |
 | **Endpoint** | `endpoints` | Affected URL/path/component | YES |
 | **Description** | `description` | Technical explanation of the vulnerability | YES |
 | **Impact** | `impact` | Real business impact (verified, not theoretical) | YES |
