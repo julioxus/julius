@@ -18,6 +18,25 @@ Automates Intigriti workflows: scope parsing → tier-prioritized testing → mo
 6. Generate Intigriti-formatted reports
 ```
 
+## Bounty-Driven Prioritization (MANDATORY FIRST STEP)
+
+**BEFORE any testing, read the program scope and create a prioritized attack plan.**
+
+1. **Parse scope completely FIRST**: Extract from the program page (PDF/URL/manual):
+   - In-scope assets with their tiers and types
+   - Bounty table (amounts per severity per tier)
+   - Program's stated worst-case scenarios or priority vulnerability types
+   - **Full out-of-scope list** (application-level AND mobile/desktop-specific exclusions)
+   - Any program-specific rules or testing limitations
+2. **Map each vuln type to the program's bounty table**: Use the ACTUAL reward amounts from this specific program — don't assume generic values. Rank attack vectors from highest to lowest payout.
+3. **Start with the program's stated worst-case scenarios** — these are what the triagers care about most and signal what they'll pay top bounty for
+4. **Cross-reference every planned test against the OOS list** BEFORE executing it. If a vuln type is excluded, don't waste time testing it regardless of how easy it might be to find.
+5. **Chain findings for impact escalation** — a low-severity finding chained with another can reach Critical. Always think about chains that multiply impact.
+6. **Drop low-impact findings quickly** if they don't chain into something bigger
+7. **Check mobile/desktop-specific exclusions separately** — programs often have a dedicated exclusion list for mobile that differs from web (e.g., certificate pinning, obfuscation, path disclosure, root detection). Read it before any APK/IPA analysis.
+
+**Present the prioritized plan to the user BEFORE starting any testing.**
+
 ## Scope Input Methods
 
 **Intigriti does NOT provide a public researcher API. Scope is obtained from the program page.**
@@ -143,6 +162,12 @@ ideviceinstaller -l | grep "<bundle_id>"
 - Tier 1 findings reviewed first
 - Mobile app analysis runs alongside web testing
 
+**Chain Discovery (DURING testing)**:
+- After each finding, actively evaluate: "Can this chain with another finding to escalate severity?"
+- Common high-value chains: open redirect + OAuth = ATO, SSRF + cloud metadata = credential theft, XSS + CSRF = stored ATO
+- When a chain opportunity is identified, prioritize testing the complementary finding immediately
+- Document chain potential in findings even if the complementary vuln hasn't been confirmed yet
+
 ## PoC Validation (CRITICAL)
 
 **Every finding MUST have**:
@@ -150,6 +175,19 @@ ideviceinstaller -l | grep "<bundle_id>"
 2. `poc_output.txt` - Timestamped execution proof
 3. `workflow.md` - Manual steps (if applicable)
 4. Evidence screenshots/videos
+
+## Pre-Submission Gate (MANDATORY before reporting)
+
+**Before submitting ANY finding, validate it passes ALL these checks:**
+
+1. **OOS check**: Re-read the program's out-of-scope list. Is this vuln type explicitly excluded? Is the asset in scope? Check BOTH the general OOS and any platform-specific OOS (mobile/desktop).
+2. **Submission requirements check**: Does the report include everything the program requires? Common Intigriti requirements:
+   - Role(s) used during testing
+   - Raw HTTP requests/responses in text format
+   - Clear step-by-step reproduction instructions
+   - Affected plan/tier if applicable
+3. **Impact honesty check**: Does the claimed severity match the demonstrated impact? Don't inflate.
+4. **Present findings to user for review**: Show a summary of each finding with severity, evidence quality, and OOS risk assessment. Let the user decide which to submit.
 
 ## Report Format
 
@@ -161,6 +199,8 @@ Required fields (Intigriti standard):
 5. **Description** (Markdown, detailed explanation)
 6. **Steps to Reproduce** (numbered, clear)
 7. **Impact** (realistic attack scenario)
+8. **Raw HTTP requests/responses** (text format, not screenshots)
+9. **Role used** (e.g., user, admin, guest, unauthenticated)
 
 Use `tools/report_validator.py` to validate.
 
