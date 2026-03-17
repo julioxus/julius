@@ -17,6 +17,25 @@ Automates HackerOne workflows: scope parsing → mobile app acquisition → para
 5. Generate HackerOne-formatted reports
 ```
 
+## Bounty-Driven Prioritization (MANDATORY FIRST STEP)
+
+**BEFORE any testing, read the program scope and create a prioritized attack plan.**
+
+1. **Parse scope completely FIRST**: Extract from the program page or CSV:
+   - In-scope assets with eligibility, severity caps, and instructions
+   - Bounty table or reward ranges per severity
+   - Program's stated priority impacts or worst-case scenarios
+   - **Full out-of-scope list** (application-level AND mobile/desktop-specific exclusions)
+   - Any program-specific rules or testing limitations
+2. **Map each vuln type to the program's bounty table**: Use the ACTUAL reward amounts from this specific program — don't assume generic values. Rank attack vectors from highest to lowest payout.
+3. **Start with the program's stated priority vulnerabilities** — these are what the triagers care about most and signal what they'll pay top bounty for
+4. **Cross-reference every planned test against the OOS list** BEFORE executing it. If a vuln type is excluded, don't waste time testing it regardless of how easy it might be to find.
+5. **Chain findings for impact escalation** — a low-severity finding chained with another can reach Critical. Always think about chains that multiply impact.
+6. **Drop low-impact findings quickly** if they don't chain into something bigger
+7. **Check mobile/desktop-specific exclusions separately** — programs often have a dedicated exclusion list for mobile that differs from web. Read it before any APK/IPA analysis.
+
+**Present the prioritized plan to the user BEFORE starting any testing.**
+
 ## Workflows
 
 **Option 1: HackerOne URL**
@@ -138,6 +157,12 @@ ideviceinstaller -l | grep "<bundle_id>"
 - Time: 2-4 hours vs 20-40 sequential
 - Mobile app analysis runs alongside web testing
 
+**Chain Discovery (DURING testing)**:
+- After each finding, actively evaluate: "Can this chain with another finding to escalate severity?"
+- Common high-value chains: open redirect + OAuth = ATO, SSRF + cloud metadata = credential theft, XSS + CSRF = stored ATO
+- When a chain opportunity is identified, prioritize testing the complementary finding immediately
+- Document chain potential in findings even if the complementary vuln hasn't been confirmed yet
+
 ## PoC Validation (CRITICAL)
 
 **Every finding MUST have**:
@@ -148,15 +173,25 @@ ideviceinstaller -l | grep "<bundle_id>"
 
 **Experimentation**: Test edge cases, verify impact, document failures.
 
+## Pre-Submission Gate (MANDATORY before reporting)
+
+**Before submitting ANY finding, validate it passes ALL these checks:**
+
+1. **OOS check**: Re-read the program's out-of-scope list. Is this vuln type explicitly excluded? Is the asset in scope? Check BOTH the general OOS and any platform-specific OOS (mobile/desktop).
+2. **Submission requirements check**: Does the report include everything the program requires? Read the program's submission requirements — each program has its own (e.g., role used, raw HTTP requests, affected plans, reproduction steps).
+3. **Impact honesty check**: Does the claimed severity match the demonstrated impact? Don't inflate.
+4. **Present findings to user for review**: Show a summary of each finding with severity, evidence quality, and OOS risk assessment. Let the user decide which to submit.
+
 ## Report Format
 
 Required sections (HackerOne standard):
 1. Summary (2-3 sentences)
 2. Severity (CVSS + business impact)
 3. Steps to Reproduce (numbered, clear)
-4. Visual Evidence (screenshots/video)
-5. Impact (realistic attack scenario)
-6. Remediation (actionable fixes)
+4. Raw HTTP requests/responses (text format)
+5. Visual Evidence (screenshots/video)
+6. Impact (realistic attack scenario)
+7. Remediation (actionable fixes)
 
 Use `tools/report_validator.py` to validate.
 
