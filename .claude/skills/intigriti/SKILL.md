@@ -280,7 +280,7 @@ Both Intigriti and HackerOne permit AI tools but require responsible use. **Ever
    - Static analysis (found in decompiled/source code but not triggered at runtime)
    - Inferred (reasonable conclusion based on code patterns but not directly confirmed)
 
-5. **Honest CVSS & impact**: Score only confirmed impact. State mitigations and caveats upfront. Never present theoretical worst-case as confirmed impact.
+5. **Honest CVSS & impact**: Score only confirmed impact. State mitigations and caveats upfront. Never present theoretical worst-case as confirmed impact. **ALWAYS compute CVSS scores using a calculator (Python/bash script), NEVER guess or estimate — the formulas are non-linear and guessing produces wrong scores.**
 
 6. **No unverified escalation**: Don't claim "full account takeover" if only information leakage was demonstrated. Don't claim "remote code execution" from a code pattern without runtime proof.
 
@@ -289,7 +289,7 @@ Both Intigriti and HackerOne permit AI tools but require responsible use. **Ever
 ## Quality Checklist
 
 - [ ] Working PoC with poc_output.txt + visual evidence
-- [ ] Accurate CVSS score with vector string
+- [ ] Accurate CVSS score with vector string (computed with calculator, not guessed)
 - [ ] Correct vulnerability type from taxonomy
 - [ ] Step-by-step reproduction + impact + remediation
 - [ ] Sensitive data sanitized

@@ -72,6 +72,9 @@
 | **Impact (C/I/A)** | None (0), Low (0.22), High (0.56) |
 
 **Severity**: None (0.0) | Low (0.1-3.9) | Medium (4.0-6.9) | High (7.0-8.9) | Critical (9.0-10.0)
+
+**MANDATORY: Always compute CVSS scores using a calculator (Python/bash). NEVER guess or estimate — the formulas are non-linear and guessing produces wrong scores. Run the calculation BEFORE writing any score in a report.**
+
 [Details: `.claude/output-standards/reference/CVSS_SCORING.md`]
 
 ---
