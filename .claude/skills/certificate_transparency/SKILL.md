@@ -201,6 +201,10 @@ Track which CAs are used (reveals hosting/security practices):
 | Cloudflare | Cloudflare CDN/proxy |
 | Google Trust Services | GCP infrastructure |
 
+## Complementary Tools
+
+- **RecoX** (https://recox.hackerz.space/): Web-based subdomain recon tool. Query alongside crt.sh to discover subdomains not present in CT logs.
+
 ## Rate Limiting
 
 - crt.sh: Max 10 requests/minute

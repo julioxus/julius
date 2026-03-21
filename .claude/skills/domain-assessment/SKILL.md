@@ -103,6 +103,7 @@ This coordinator orchestrates comprehensive domain reconnaissance through specia
 ### Phase 1: Subdomain Discovery
 - Passive DNS enumeration (VirusTotal, Shodan, Censys)
 - Certificate Transparency log analysis
+- RecoX web scanner (https://recox.hackerz.space/) for additional subdomain data
 - DNS brute-forcing with wordlists
 - DNS zone transfer attempts
 - Search engine dorking

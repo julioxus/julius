@@ -109,6 +109,19 @@ Query passive DNS databases (if available).
 
 **Note:** This operation is optional and depends on available API access.
 
+### 5. recox_scan
+
+Query RecoX web-based reconnaissance tool for additional subdomain data.
+
+**Endpoint:** `https://recox.hackerz.space/`
+
+**Process:**
+1. Use WebFetch to query RecoX with the target domain
+2. Parse results for subdomains not found by other sources
+3. Merge with crt.sh and wordlist results, deduplicating
+
+**Note:** RecoX complements crt.sh and subfinder by using additional data sources. Always query it alongside other tools to maximize coverage.
+
 ## Output
 
 ```json
