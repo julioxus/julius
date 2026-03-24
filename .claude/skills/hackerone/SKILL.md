@@ -165,12 +165,19 @@ See `/subdomain_enumeration` skill for detailed lessons learned and gotchas.
 
 **Mobile assets**: Deploy `/mobile-security` skill agents after app download
 
+**DOM XSS scanning (AUTOMATIC for JS-heavy targets)**:
+When httpx tech-detect or page analysis reveals JavaScript frameworks (React, Vue, Angular, jQuery, Next.js, Nuxt, SvelteKit) or the target is a SPA:
+- Deploy `dom-xss-scanner` agent **in parallel** with the Pentester agent for that asset
+- The scanner hooks sinks (innerHTML, document.write, eval, jQuery.html), injects canaries through all DOM sources, and detects taint flow automatically
+- Findings feed back into the Pentester agent's results for chain analysis
+- Trigger criteria: httpx `tech-detect` output contains JS framework names, OR page has `<div id="app">`, `data-reactroot`, `ng-app`, `[data-v-]`, OR `Content-Type` indicates SPA (HTML shell + JS bundles)
+
 **Parallel Execution**:
-- 10 assets = 10 Pentester agents
+- 10 assets = 10 Pentester agents + dom-xss-scanner where applicable
 - Each spawns 30+ specialized agents
 - Total: 300+ concurrent tests
 - Time: 2-4 hours vs 20-40 sequential
-- Mobile app analysis runs alongside web testing
+- Mobile app analysis + DOM XSS scanning run alongside web testing
 
 **Chain Discovery (DURING testing)**:
 - After each finding, actively evaluate: "Can this chain with another finding to escalate severity?"
