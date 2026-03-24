@@ -163,6 +163,18 @@ ideviceinstaller -l | grep "<bundle_id>"
 
 See `/subdomain_enumeration` skill for detailed lessons learned and gotchas.
 
+## Extended Recon (AUTOMATIC, parallel with post-enumeration pipeline)
+
+Deploy these skills **in parallel** during recon to expand attack surface and inform pentester agents:
+
+1. **`/code-repository-intel`** — Scan GitHub/GitLab for public repos, leaked secrets, CI configs, dependency files. High-value: exposed `.env`, API keys in commit history, internal endpoints in CI pipelines.
+2. **`/api-portal-discovery`** — Discover public API portals, developer docs, OpenAPI/Swagger specs. Endpoints found here bypass WAF and often lack rate limiting.
+3. **`/web-application-mapping`** — Comprehensive endpoint discovery via passive browsing + headless automation. Maps forms, AJAX calls, WebSocket connections, and hidden functionality.
+4. **`/security-posture-analyzer`** — Enumerate security headers (CSP, HSTS, X-Frame-Options), WAF presence, and security.txt. Results directly inform payload selection and bypass strategy.
+5. **`/cdn-waf-fingerprinter`** — Identify CDN (Cloudflare, Akamai, Fastly) and WAF. Critical for: filtering ffuf results, selecting XSS payloads that bypass WAF rules, identifying origin IP bypass opportunities.
+
+**Feed results to pentester agents**: All discovered endpoints, API specs, security posture data, and WAF fingerprints are passed as context to each Pentester agent to enable targeted testing.
+
 ## Agent Deployment
 
 **Pentester Agent** per asset (tier-prioritized):
@@ -184,6 +196,16 @@ When httpx tech-detect or page analysis reveals JavaScript frameworks (React, Vu
 - Each spawns specialized agents
 - Tier 1 findings reviewed first
 - Mobile app analysis + DOM XSS scanning run alongside web testing
+
+**Conditional Specialized Testing (AUTOMATIC based on recon results)**:
+Deploy these skills when recon or tech detection identifies specific conditions:
+
+- **`/cve-testing`** — When httpx, nuclei, or tech-detect identifies specific software versions (e.g., Apache 2.4.49, jQuery 3.4.1, Spring 5.3.x). Researches known CVEs and tests with public exploits. High-value: unpatched services on non-standard ports.
+- **`/ai-threat-testing`** — When recon discovers AI/LLM features: chatbots, AI assistants, `/api/chat`, `/api/completions`, prompt-based interfaces, or OpenAI/Anthropic SDK references in JS bundles. Tests OWASP LLM Top 10 (prompt injection, model extraction, data poisoning).
+- **`/authenticating`** — When login/signup forms are discovered. Automates credential testing, 2FA bypass, CAPTCHA solving, session management analysis via Playwright MCP. Deploy for each unique auth endpoint found.
+- **`/cloud-security`** — When `/cloud-infra-detector` or recon identifies AWS/Azure/GCP infrastructure (S3 buckets, Azure blobs, metadata endpoints, cloud-specific headers). Tests IAM misconfigs, storage enumeration, SSRF to metadata service.
+- **`/container-security`** — When Kubernetes/Docker indicators are found (K8s headers, `/healthz` endpoints, container orchestration signals, `.docker` files in repos). Tests RBAC, pod security, network policies, container escape vectors.
+- **`/burp-suite`** — When Burp Suite MCP is available. Deploy for active scanning + Collaborator OOB testing on high-value endpoints. Essential for blind XSS, blind SSRF, and out-of-band data exfiltration detection.
 
 **Chain Discovery (DURING testing)**:
 - After each finding, actively evaluate: "Can this chain with another finding to escalate severity?"
@@ -338,6 +360,9 @@ Both Intigriti and HackerOne permit AI tools but require responsible use. **Ever
 - `tools/report_validator.py` - Validate report completeness
 - `/pentest` skill - Core testing functionality
 - `/mobile-security` skill - Mobile app analysis
+- `dom-xss-scanner` agent - Automated DOM XSS via Playwright (auto for JS targets)
+- **Recon skills** (auto-parallel): `/code-repository-intel`, `/api-portal-discovery`, `/web-application-mapping`, `/security-posture-analyzer`, `/cdn-waf-fingerprinter`
+- **Conditional skills**: `/cve-testing`, `/ai-threat-testing`, `/authenticating`, `/cloud-security`, `/container-security`, `/burp-suite`
 - Pentester agent - Orchestrates testing
 
 ## Usage
