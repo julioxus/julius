@@ -10,12 +10,16 @@ Automates Intigriti workflows: scope parsing → tier-prioritized testing → mo
 ## Quick Start
 
 ```
-1. Input: Intigriti program page (PDF, URL, or manual scope description)
-2. Parse scope: extract assets, tiers, types, and program rules
-3. For mobile assets: detect running emulators and download apps from marketplace
-4. Deploy Pentester agents in parallel (tier-prioritized)
-5. Validate PoCs (poc.py + poc_output.txt required)
-6. Generate Intigriti-formatted reports
+1. Input: Intigriti program URL, PDF, or manual scope description
+2. If URL provided and $INTIGRITI_PAT is set:
+   → Resolve program handle to ID via Researcher API
+   → Fetch domains, tiers, rules of engagement, and testing requirements
+   → Apply required User-Agent/headers from testingRequirements
+3. Parse scope: extract assets, tiers, types, and program rules
+4. For mobile assets: detect running emulators and download apps from marketplace
+5. Deploy Pentester agents in parallel (tier-prioritized)
+6. Validate PoCs (poc.py + poc_output.txt required)
+7. Generate Intigriti-formatted reports
 ```
 
 ## Bounty-Driven Prioritization (MANDATORY FIRST STEP)
@@ -39,9 +43,59 @@ Automates Intigriti workflows: scope parsing → tier-prioritized testing → mo
 
 ## Scope Input Methods
 
-**Intigriti does NOT provide a public researcher API. Scope is obtained from the program page.**
+**Option 1: Program URL via Researcher API** (recommended)
+```
+- [ ] User provides Intigriti program URL (e.g., https://app.intigriti.com/programs/<company>/<handle>/detail)
+- [ ] Extract program handle from URL
+- [ ] Resolve handle to programId: GET /v1/programs?limit=500, match by handle field
+- [ ] Fetch program details: GET /v1/programs/{programId}
+      → Returns: domains (assets with type, tier, endpoint), rules of engagement, status, bounty range
+- [ ] Fetch full domains: GET /v1/programs/{programId}/domains/{versionId}
+      → Returns: each domain with id, type, endpoint, tier, description, requiredSkills
+- [ ] Fetch rules: GET /v1/programs/{programId}/rules-of-engagements/{versionId}
+      → Returns: description, testingRequirements (automatedTooling, userAgent, requestHeader), safeHarbour, attachments
+- [ ] Parse into structured scope for agent deployment
+```
 
-**Option 1: PDF of program page** (recommended)
+**Researcher API Configuration:**
+```
+Base URL: https://api.intigriti.com/external/researcher
+Auth:     Authorization: Bearer $INTIGRITI_PAT
+Version:  v1 (BETA)
+```
+
+**Key API Endpoints:**
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | /v1/programs | List all accessible programs (filter: statusId, typeId, following) |
+| GET | /v1/programs/{programId} | Program details with domains and rules |
+| GET | /v1/programs/{programId}/domains/{versionId} | Full domain/asset list for a version |
+| GET | /v1/programs/{programId}/rules-of-engagements/{versionId} | Rules, testing requirements, attachments |
+| GET | /v1/programs/activities | Program change events (scope updates, rule changes) |
+
+**API Response → Scope Mapping:**
+- `domains[].endpoint` → Asset name (domain, wildcard, app bundle)
+- `domains[].type.value` → Asset type (Web Application, API, iOS, Android, etc.)
+- `domains[].tier.value` → Tier (1-5, Tier 1 = highest bounty)
+- `domains[].description` → Per-asset testing instructions
+- `rulesOfEngagement.content.description` → Program rules, OOS list, bounty table
+- `rulesOfEngagement.content.testingRequirements.userAgent` → Required User-Agent header
+- `rulesOfEngagement.content.testingRequirements.requestHeader` → Required custom request header
+- `rulesOfEngagement.content.testingRequirements.automatedTooling` → Automated tool policy
+- `rulesOfEngagement.content.safeHarbour` → Safe harbour status
+
+**Handle Resolution from URL:**
+```bash
+# Extract handle from URL: https://app.intigriti.com/programs/<company>/<handle>/detail
+HANDLE=$(echo "$URL" | grep -oP 'programs/[^/]+/\K[^/]+')
+
+# Resolve to programId via API
+curl -s -H "Authorization: Bearer $INTIGRITI_PAT" \
+  "https://api.intigriti.com/external/researcher/v1/programs?limit=500" \
+  | jq -r ".records[] | select(.handle == \"$HANDLE\") | .id"
+```
+
+**Option 2: PDF of program page**
 ```
 - [ ] Read PDF with program details
 - [ ] Extract assets table (name, type, tier)
@@ -49,15 +103,15 @@ Automates Intigriti workflows: scope parsing → tier-prioritized testing → mo
 - [ ] Parse into structured scope for agent deployment
 ```
 
-**Option 2: Program URL (browser scraping)**
+**Option 3: Program URL (browser scraping fallback)**
 ```
-- [ ] User provides Intigriti program URL
+- [ ] Use when API is unavailable or PAT not configured
 - [ ] Use Playwright MCP or browser tools to load the page
 - [ ] Extract scope table, bounty table, and rules
 - [ ] Parse into structured scope
 ```
 
-**Option 3: Manual input**
+**Option 4: Manual input**
 ```
 - [ ] AskUserQuestion: "Provide the in-scope assets (domain/app, type, tier):"
 - [ ] AskUserQuestion: "Any specific program rules or exclusions?"
@@ -300,8 +354,8 @@ outputs/intigriti-<program>/
 
 | Aspect | Intigriti | HackerOne |
 |--------|-----------|-----------|
-| Scope format | Domain-based (program page) | CSV file |
-| Scope retrieval | PDF / URL / manual | CSV download |
+| Scope format | Domain-based (tiers, types) | CSV file |
+| Scope retrieval | Researcher API (PAT) / PDF / URL / manual | CSV download / API |
 | Triage | Managed by Intigriti team | Company-triaged |
 | Currency | EUR | USD |
 | Vuln classification | Taxonomy dropdown | Free-text |
@@ -313,7 +367,10 @@ See `reference/PLATFORM_GUIDE.md` for full comparison.
 ## Critical Rules
 
 **MUST DO**:
-- Parse scope from user-provided program data (PDF, URL, or manual input)
+- When a program URL is provided, use the Researcher API with `$INTIGRITI_PAT` to fetch scope (preferred over scraping)
+- If `$INTIGRITI_PAT` is not set, ask the user for it or fall back to PDF/scraping/manual input
+- Apply `testingRequirements` from the API (User-Agent, custom headers) to all testing agents
+- Parse scope from user-provided program data (API, PDF, URL, or manual input)
 - **Auto-download mobile apps** from running emulators when iOS/Android assets are in scope
 - Validate ALL PoCs before reporting
 - Sanitize sensitive data
