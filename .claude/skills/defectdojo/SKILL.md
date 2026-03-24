@@ -62,96 +62,237 @@ python tools/iap_browser_auth.py --clear
 ```
 1. Validate DEFECTDOJO_URL + DEFECTDOJO_TOKEN (see above)
 2. Input: Product name + engagement name (or IDs)
-3. Create product/engagement if needed
-4. Scan outputs/ for validated findings
-5. Map findings → CWE + DefectDojo severity
-6. Import via API with evidence uploads
-7. Verify import and present summary
+3. Perform security review / testing
+4. WRITE LOCAL REPORTS to outputs/defectdojo-{engagement}/findings/finding-NNN/report.md
+5. Present summary table → user validates locally
+6. AskUserQuestion: approve upload to DefectDojo
+7. Import approved findings via API with evidence uploads
+8. Verify import and present summary
 ```
+
+## Phase 1: Local Report Generation (MANDATORY BEFORE ANY API UPLOAD)
+
+**All findings MUST be written to local disk first.** The user reviews and validates reports locally before any DefectDojo interaction. This mirrors the bug bounty workflow (`/hackerone`, `/intigriti`).
+
+### Report File Format
+
+Each finding is a standalone `report.md` with YAML frontmatter + full markdown body:
+
+```markdown
+---
+title: "Short descriptive title"
+cwe: 918
+cvssv3: "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:L/A:N"
+cvssv3_score: 7.5
+severity: High
+endpoint: "src/app/Domain/Example/Action.php"
+---
+
+## Description
+
+Technical explanation of the vulnerability. MUST include affected
+components, file paths, API routes, or infrastructure elements.
+
+Include relevant code snippets:
+
+` ` `php
+// Vulnerable code with file:line reference
+$url = $request->input('url');
+Http::get($url); // No validation
+` ` `
+
+## Impact
+
+Real business impact (verified, not theoretical). What can an attacker
+actually achieve? What's the blast radius?
+
+## Steps to Reproduce
+
+1. First step with exact command/request
+2. Second step...
+3. Observe the result
+
+` ` `bash
+curl -X POST https://example.com/api/vulnerable-endpoint \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"url": "http://169.254.169.254/latest/meta-data/"}'
+` ` `
+
+## Mitigation
+
+Actionable remediation guidance with code examples where possible.
+
+` ` `php
+// Recommended fix
+$allowedHosts = ['cdn.example.com', 'images.example.com'];
+$parsed = parse_url($url);
+if (!in_array($parsed['host'], $allowedHosts)) {
+    abort(400, 'URL host not allowed');
+}
+` ` `
+```
+
+### Frontmatter Fields
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `title` | string | YES | Short description, no CWE prefix |
+| `cwe` | integer | YES | CWE ID (see reference/CWE_MAPPING.md) |
+| `cvssv3` | string | YES | Full `CVSS:3.1/AV:.../...` vector |
+| `cvssv3_score` | float | YES | **MUST be computed with calculator, never guessed** |
+| `severity` | string | YES | Must match CVSS score: Critical(9.0-10.0)/High(7.0-8.9)/Medium(4.0-6.9)/Low(0.1-3.9)/Info(0.0) |
+| `endpoint` | string | YES | Affected file path, API route, or component |
+
+### Writing Reports
+
+```
+For EACH finding:
+1. Create directory: outputs/defectdojo-{engagement}/findings/finding-{NNN}/
+2. Write report.md with frontmatter + full body (Description, Impact, Steps to Reproduce, Mitigation)
+3. Copy/write any evidence files (screenshots, PoC scripts, HTTP logs) into the same directory
+4. CVSS score MUST be computed programmatically — use Python or bash calculator, NEVER guess
+```
+
+### Validation Before Upload
+
+After all reports are written locally:
+```
+1. Present summary table to user:
+   | # | Title | Severity | CVSS | CWE | Endpoint |
+2. Tell user: "Reports written to outputs/defectdojo-{engagement}/findings/"
+3. AskUserQuestion: "Review the local reports. Which findings should I upload to DefectDojo?"
+   options: ["Upload all", "Let me review first and tell you which ones", "Skip upload for now"]
+4. If "Let me review first" → STOP and wait for user to come back with specific instructions
+5. If "Skip upload" → STOP. Reports remain local for future upload.
+6. If "Upload all" → proceed to Phase 2
+```
+
+## Phase 2: DefectDojo Upload (ONLY after local validation)
+
+**NEVER proceed to Phase 2 without explicit user approval on Phase 1 reports.**
+
+### Upload Workflow
+
+```
+- [ ] Validate API credentials (mandatory first step)
+- [ ] Identify product and engagement (search existing via API)
+- [ ] **If product/engagement need to be created → AskUserQuestion for approval first**
+- [ ] Read approved report.md files from outputs/defectdojo-{engagement}/findings/
+- [ ] Parse frontmatter → DefectDojo API fields
+- [ ] Deduplicate against existing findings in the engagement
+- [ ] Create/find test "Manual Review" (type "Manual Code Review") in engagement via /api/v2/tests/
+- [ ] Import findings via POST /api/v2/findings/ (linked to Manual Review test)
+- [ ] Upload evidence files from each finding directory
+- [ ] Write import results to outputs/defectdojo-{engagement}/reports/defectdojo-import.json
+- [ ] Verify and present summary with DD finding IDs + URLs
+```
+
+### Cross-References Between Findings
+
+When a finding references another finding, and both are being uploaded:
+1. **Plan import order** — create referenced findings first
+2. After creating Finding A, get its DefectDojo ID
+3. Update Finding B's report.md body to include `[Finding A](https://dojo.example.com/finding/{DD_ID})`
+4. Then create Finding B
 
 ## Workflows
 
-**Option 1: Import from Pentest Engagement**
+**Option 1: Security Code Review (New Engagement)**
 ```
-- [ ] Validate API credentials (mandatory)
-- [ ] Identify product and engagement (search existing via API)
-- [ ] **If product/engagement need to be created → AskUserQuestion for approval first**
-- [ ] Scan outputs/{engagement}/findings/ for validated findings
-- [ ] **Verify real impact for EVERY finding** — reproduce with working PoC against a live/local instance, capture evidence. No PoC = No import. Same standard as bug bounty programs.
-   - [ ] **Require pentester-validator PASS** — only import findings that passed all 5 anti-hallucination checks (CVSS consistency, evidence exists, PoC validation, claims vs raw evidence, log corroboration). Check for `validated/{finding_id}.json` in the output. Findings in `false-positives/` MUST NOT be imported.
-- [ ] **Format each finding per DefectDojo schema** — title, CWE, CVSS vector+score, endpoint, description, impact, steps_to_reproduce, mitigation (see Finding Format section). All fields mandatory.
-- [ ] Map vulnerability types → CWE IDs (reference/CWE_MAPPING.md)
-- [ ] Deduplicate against existing findings
-- [ ] **Present findings summary table to user (title, severity, CWE, PoC status)**
-- [ ] **AskUserQuestion: get explicit approval before importing**
-- [ ] Create/find test "Manual Review" (type "Manual Code Review") in engagement via /api/v2/tests/
-- [ ] Import ONLY approved findings via POST /api/v2/findings/ (linked to the Manual Review test)
-- [ ] Upload evidence (screenshots, PoCs, HTTP logs)
-- [ ] Verify and present summary
+Phase 1 — Local:
+- [ ] Validate API credentials
+- [ ] Fetch engagement details via API (product, repo, branch, scope)
+- [ ] Perform security review of the codebase/changes
+- [ ] Create outputs/defectdojo-{engagement}/ directory structure
+- [ ] Write each finding as finding-NNN/report.md with frontmatter
+- [ ] Include evidence (code snippets, HTTP logs, PoC scripts) in each finding dir
+- [ ] Present summary table → user validates locally
+
+Phase 2 — Upload (after user approval):
+- [ ] Parse validated report.md files
+- [ ] Deduplicate against existing DD findings
+- [ ] Create "Manual Review" test in engagement
+- [ ] Import approved findings with evidence
+- [ ] Write defectdojo-import.json with DD IDs
 ```
 
-**Option 2: Import from Scanner Output**
+**Option 2: Import from Existing Pentest Findings**
 ```
-- [ ] Validate API credentials (mandatory)
-- [ ] Identify product and engagement (search existing via API)
-- [ ] **If product/engagement need to be created → AskUserQuestion for approval first**
+Phase 1 — Local:
+- [ ] Validate API credentials
+- [ ] Scan outputs/{engagement}/findings/ for existing validated findings
+- [ ] **Require pentester-validator PASS** — only include findings with validated/{finding_id}.json
+- [ ] Convert to DefectDojo report format if needed (add frontmatter)
+- [ ] Present summary → user validates
+
+Phase 2 — Upload (after user approval):
+- [ ] Import approved findings via API
+- [ ] Upload evidence (screenshots, PoCs, HTTP logs)
+- [ ] Write defectdojo-import.json
+```
+
+**Option 3: Import from Scanner Output**
+```
+- [ ] Validate API credentials
+- [ ] Identify product and engagement
 - [ ] Detect scanner format and show user what will be imported
 - [ ] **AskUserQuestion: get explicit approval before importing scan**
-- [ ] Use reimport endpoint for supported formats:
-  POST /api/v2/reimport-scan/ (Nuclei, Nmap, ZAP, Burp, etc.)
-- [ ] Verify imported findings
-- [ ] Present summary
+- [ ] Use reimport endpoint: POST /api/v2/reimport-scan/
+- [ ] Verify imported findings and present summary
 ```
 
-**Option 3: Sync Bug Bounty Findings**
+**Option 4: Sync Bug Bounty Findings**
 ```
-- [ ] Validate API credentials (mandatory)
+Phase 1 — Local:
+- [ ] Validate API credentials
 - [ ] Read findings from outputs/hackerone-* or outputs/intigriti-*
-- [ ] **Require pentester-validator PASS for all findings** — skip any without validated/{finding_id}.json
-- [ ] **AskUserQuestion: confirm product/engagement creation before proceeding**
-- [ ] Create product per program, engagement per campaign (only after approval)
-- [ ] **Present all findings to user for review**
-- [ ] **AskUserQuestion: get explicit approval before importing**
-- [ ] Import ONLY approved findings with platform-specific metadata as notes
+- [ ] **Require pentester-validator PASS** — skip any without validated/{finding_id}.json
+- [ ] Convert to DefectDojo report format (outputs/defectdojo-{engagement}/findings/)
+- [ ] Present summary → user validates
+
+Phase 2 — Upload (after user approval):
+- [ ] Create product per program, engagement per campaign
+- [ ] Import approved findings with platform-specific metadata as notes
 - [ ] Upload submission reports as evidence
 ```
 
-**Option 4: Import CVE PoC Generator Findings**
+**Option 5: Import CVE PoC Generator Findings**
 ```
-- [ ] Validate API credentials (mandatory)
-- [ ] Read findings from outputs/processed/cve-pocs/CVE-XXXX-XXXXX/
-- [ ] Parse poc.py + report.md (generated by /cve-poc-generator)
-- [ ] Extract: CVE ID, CVSS vector+score from NVD data, CWE ID, affected versions
-- [ ] Map to DefectDojo format: title="CVE-XXXX-XXXXX: <description>", CWE from report
-- [ ] **AskUserQuestion: confirm product/engagement before proceeding**
-- [ ] **Present findings summary and get explicit approval**
-- [ ] Import with poc.py as evidence, report.md content in description
+Phase 1 — Local:
+- [ ] Validate API credentials
+- [ ] Read from outputs/processed/cve-pocs/CVE-XXXX-XXXXX/
+- [ ] Parse poc.py + report.md → convert to DefectDojo report format
+- [ ] Write to outputs/defectdojo-{engagement}/findings/
+- [ ] Present summary → user validates
+
+Phase 2 — Upload (after user approval):
+- [ ] Import with poc.py as evidence
 - [ ] Tag findings with CVE ID for deduplication
 ```
 
 ## Finding Format (MANDATORY)
 
-Every finding MUST include ALL of these fields before import. Missing fields = do not import.
+Every finding MUST be written as a local `report.md` file first (see Phase 1). The report.md frontmatter maps directly to DefectDojo API fields during Phase 2 upload.
 
 **Markdown formatting**: All text fields (`description`, `impact`, `steps_to_reproduce`, `mitigation`) are rendered as **Markdown** in the DefectDojo UI. Always use proper markdown: `### Headers` for sections, `` ```python ``/`` ```bash `` for code blocks, `| col | col |` for tables, `**bold**` for emphasis, `> quotes` for results, and `-` for lists. Never use plain text formatting — it will render poorly.
 
-**Cross-references between findings**: When a finding references another finding, ALWAYS use a markdown link with the DefectDojo finding URL: `[Finding #1234](https://dojo.example.com/finding/1234)`. This means findings that are referenced by others MUST be created first. **Plan the import order so that dependencies are created before dependents** — e.g., if Finding B references Finding A, create Finding A first, get its DefectDojo ID, then use that URL when creating Finding B.
+**No abbreviations — match local reports exactly**: The DefectDojo finding MUST contain the same level of detail as the local `report.md`. Never summarize, shorten, or omit content when importing. Include all code snippets, all PoC commands, all HTTP responses, all tables, and all evidence. Full URLs, full paths, full commands — never use `...` or ellipsis.
 
-**No abbreviations — match local reports exactly**: The DefectDojo finding MUST contain the same level of detail as the local report (`outputs/*/findings/finding-NNN/report.md`). Never summarize, shorten, or omit content when importing to DefectDojo. Include all code snippets, all PoC commands, all HTTP responses, all tables, and all evidence from the local report. Full URLs, full paths, full commands — never use `...` or ellipsis.
+### Frontmatter → DefectDojo API Mapping
 
-| Field | DefectDojo API field | Format | Required |
-|-------|---------------------|--------|----------|
-| **Title** | `title` | `Short description` (no CWE prefix) | YES |
-| **CWE** | `cwe` | Integer ID (see reference/CWE_MAPPING.md) | YES |
-| **CVSS Vector** | `cvssv3` | Full `CVSS:3.1/AV:.../...` string | YES |
-| **CVSS Score** | `cvssv3_score` | Numeric (0.0-10.0), **MUST be computed with a calculator (Python/bash), never guessed** | YES |
-| **Severity** | `severity` | Critical(9.0-10.0)/High(7.0-8.9)/Medium(4.0-6.9)/Low(0.1-3.9)/Info(0.0) — MUST match CVSS score, never override manually | YES |
-| **Endpoint** | `endpoints` | Affected URL/path/component | YES |
-| **Description** | `description` | Technical explanation of the vulnerability. **MUST include affected components and endpoints** (e.g., file paths, API routes, infrastructure elements). | YES |
-| **Impact** | `impact` | Real business impact (verified, not theoretical) | YES |
-| **Steps to Reproduce** | `steps_to_reproduce` | Numbered steps with exact commands/requests | YES |
-| **Mitigation** | `mitigation` | Actionable remediation guidance | YES |
-| **Evidence** | file upload | Screenshots, PoC scripts, HTTP logs | YES |
+| report.md frontmatter | DefectDojo API field | Format |
+|------------------------|---------------------|--------|
+| `title` | `title` | Short description (no CWE prefix) |
+| `cwe` | `cwe` | Integer ID (see reference/CWE_MAPPING.md) |
+| `cvssv3` | `cvssv3` | Full `CVSS:3.1/AV:.../...` string |
+| `cvssv3_score` | `cvssv3_score` | Numeric (0.0-10.0), **computed with calculator** |
+| `severity` | `severity` | Must match CVSS score range |
+| `endpoint` | `endpoints` | Affected URL/path/component |
+| Body `## Description` | `description` | Technical explanation |
+| Body `## Impact` | `impact` | Verified business impact |
+| Body `## Steps to Reproduce` | `steps_to_reproduce` | Numbered steps with commands |
+| Body `## Mitigation` | `mitigation` | Actionable remediation |
+| `finding-NNN/evidence/*` | file upload | Screenshots, PoCs, HTTP logs |
 
 ## Engagement Types
 
@@ -170,31 +311,49 @@ Use `tools/scanner_mapper.py` to identify format from file.
 ## Output Structure
 
 ```
-outputs/defectdojo-{product}/
+outputs/defectdojo-{engagement}/
+├── findings/                       # LOCAL REPORTS (Phase 1 — written before any upload)
+│   ├── finding-001/
+│   │   ├── report.md               # Frontmatter + full markdown (Description, Impact, Steps, Mitigation)
+│   │   ├── poc.py                   # PoC script (if applicable)
+│   │   ├── poc_output.txt           # PoC execution output
+│   │   └── evidence/               # Screenshots, HTTP logs, etc.
+│   │       ├── request.txt
+│   │       └── screenshot.png
+│   ├── finding-002/
+│   │   ├── report.md
+│   │   └── evidence/
+│   └── ...
 ├── reports/
-│   └── defectdojo-import.json    # Import results with DD IDs
+│   └── defectdojo-import.json      # Phase 2: Import results with DD finding IDs + URLs
 ├── activity/
-│   └── defectdojo-reporter.log   # NDJSON activity log
+│   └── defectdojo-reporter.log     # NDJSON activity log
 └── evidence/
-    └── uploaded/                  # Tracking uploaded files
+    └── uploaded/                    # Tracking of files uploaded to DD
 ```
+
+**Naming convention**: `defectdojo-{engagement}` uses the engagement name slug (lowercase, hyphens). Examples:
+- Engagement "SLIDES - Presentation Maker 3.1" → `outputs/defectdojo-slides-pmaker-3.1/`
+- Engagement "SRE Magnific Audit" → `outputs/defectdojo-sre-magnific/`
 
 ## Critical Rules
 
 **MUST DO**:
+- **ALWAYS write local reports first (Phase 1)** — NEVER call the DefectDojo API to create findings without having local report.md files written and validated by the user
 - **Validate DEFECTDOJO_URL + DEFECTDOJO_TOKEN before any operation**
-- **ASK USER APPROVAL BEFORE UPLOADING EACH FINDING** — present a summary table of all findings (title, severity, CWE) and use AskUserQuestion to get explicit confirmation before importing. NEVER auto-import findings without user consent.
-- **CREATE FINDINGS UNDER A TEST** — always create/find a test named "Manual Review" with test type "Manual Code Review" in the engagement, then link all findings to that test ID.
+- **ASK USER APPROVAL BEFORE UPLOADING** — present summary table, tell user where reports are on disk, get explicit confirmation before Phase 2
+- **CREATE FINDINGS UNDER A TEST** — always create/find a test named "Manual Review" (type "Manual Code Review") in the engagement
 - Map CWE IDs accurately (reference/CWE_MAPPING.md)
 - Deduplicate against existing findings
-- Upload all evidence files
+- Upload all evidence files from finding directories
 - Verify import completeness
 
 **NEVER**:
+- **Skip Phase 1 (local reports)** — even if findings come from another tool or previous engagement, they MUST exist as local report.md files before upload
 - **Proceed without validated API credentials**
-- **Create or modify ANY resource in DefectDojo (product, engagement, test, finding) without explicit user approval first**
-- **Import findings without validated PoC** — every finding MUST have a working proof-of-concept reproduced against a live/local instance with captured evidence, same standard as bug bounty programs
-- **Import findings that failed pentester-validator** — check for `validated/{finding_id}.json` before import. If a finding is in `false-positives/`, it MUST NOT be imported regardless of user request
+- **Create or modify ANY resource in DefectDojo without explicit user approval first**
+- **Import findings without validated PoC** — every finding MUST have a working proof-of-concept with captured evidence
+- **Import findings that failed pentester-validator** — check for `validated/{finding_id}.json` before import
 - Import fabricated or placeholder findings
 - Overwrite existing findings without user approval
 - Skip deduplication
