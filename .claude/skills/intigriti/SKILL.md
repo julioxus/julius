@@ -197,13 +197,22 @@ See `/subdomain_enumeration` skill for detailed lessons learned and gotchas.
 **Before submitting ANY finding, validate it passes ALL these checks:**
 
 1. **OOS check**: Re-read the program's out-of-scope list. Is this vuln type explicitly excluded? Is the asset in scope? Check BOTH the general OOS and any platform-specific OOS (mobile/desktop).
-2. **Submission requirements check**: Does the report include everything the program requires? Common Intigriti requirements:
+2. **Business logic verification (CRITICAL — prevents "by design" rejections)**:
+   Before reporting any data exposure, information leak, or access control finding, verify it's NOT intended behavior:
+   - **Understand the core service**: What does this company actually do? Search the company's website, About page, and marketing materials. If they are a people-search engine, exposing personal data IS the product. If they are a public registry, open access IS the feature.
+   - **Check public documentation**: Read ToS, Privacy Policy, FAQ, API docs, and help pages. Do they describe or justify the behavior you found? Look for phrases like "publicly available information", "data provided by users", "open access".
+   - **Compare with competitors**: Do similar services in the same industry expose the same data or behave the same way? If all competitors do it, it's likely an industry norm, not a vulnerability.
+   - **Test the "would a customer complain?" heuristic**: If a regular user of this service saw this behavior, would they be surprised? Or is it exactly what they signed up for?
+   - **Check for explicit access controls**: Is there a login wall, paywall, or robots.txt restriction that the data bypasses? If the data is freely browsable without authentication, it's likely public by design.
+   - **Document your conclusion**: In the finding, explicitly state why this behavior is NOT by design. If you cannot articulate a clear reason, DO NOT report it.
+   - **When in doubt, ASK the user** before reporting — a "by design" rejection wastes everyone's time and damages researcher reputation.
+3. **Submission requirements check**: Does the report include everything the program requires? Common Intigriti requirements:
    - Role(s) used during testing
    - Raw HTTP requests/responses in text format
    - Clear step-by-step reproduction instructions
    - Affected plan/tier if applicable
-3. **Impact honesty check**: Does the claimed severity match the demonstrated impact? Don't inflate.
-4. **Present findings to user for review**: Show a summary of each finding with severity, evidence quality, and OOS risk assessment. Let the user decide which to submit.
+4. **Impact honesty check**: Does the claimed severity match the demonstrated impact? Don't inflate.
+5. **Present findings to user for review**: Show a summary of each finding with severity, evidence quality, OOS risk assessment, and business logic verification result. Let the user decide which to submit.
 
 ## Report Format
 
@@ -310,6 +319,7 @@ Both Intigriti and HackerOne permit AI tools but require responsible use. **Ever
 - [ ] Step-by-step reproduction + impact + remediation
 - [ ] Sensitive data sanitized
 - [ ] Mobile apps downloaded and analyzed (if in scope)
+- [ ] **Business logic verified: behavior is NOT by design** (checked company service, docs, competitors)
 - [ ] **AI Disclosure section included**
 - [ ] **All technical claims verified against real evidence**
 - [ ] **No fabricated endpoints, placeholders, or generic templates**
