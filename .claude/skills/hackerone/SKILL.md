@@ -174,6 +174,8 @@ Deploy these skills **in parallel** during recon to expand attack surface and in
 - Passes program-specific guidelines
 - Tests all vulnerability types
 - Returns validated findings with PoCs
+- Has access to `patt-fetcher` agent for on-demand PayloadsAllTheThings payloads (30+ categories: SQLi, XSS, SSTI, SSRF, deserialization, OAuth, etc.)
+- Has access to `script-generator` agent for optimized PoC scripts (>30 lines, parallelized, syntax-validated)
 
 **Mobile assets**: Deploy `/mobile-security` skill agents after app download
 
@@ -194,7 +196,7 @@ When httpx tech-detect or page analysis reveals JavaScript frameworks (React, Vu
 **Conditional Specialized Testing (AUTOMATIC based on recon results)**:
 Deploy these skills when recon or tech detection identifies specific conditions:
 
-- **`/cve-testing`** — When httpx, nuclei, or tech-detect identifies specific software versions (e.g., Apache 2.4.49, jQuery 3.4.1, Spring 5.3.x). Researches known CVEs and tests with public exploits. High-value: unpatched services on non-standard ports.
+- **`/cve-testing`** + **`/cve-poc-generator`** — When httpx, nuclei, or tech-detect identifies specific software versions (e.g., Apache 2.4.49, jQuery 3.4.1, Spring 5.3.x). `/cve-testing` researches known CVEs and tests with public exploits. When a CVE is confirmed, `/cve-poc-generator` creates a standalone Python PoC script + detailed report with NVD data, CVSS vector, and remediation. High-value: unpatched services on non-standard ports.
 - **`/ai-threat-testing`** — When recon discovers AI/LLM features: chatbots, AI assistants, `/api/chat`, `/api/completions`, prompt-based interfaces, or OpenAI/Anthropic SDK references in JS bundles. Tests OWASP LLM Top 10 (prompt injection, model extraction, data poisoning).
 - **`/authenticating`** — When login/signup forms are discovered. Automates credential testing, 2FA bypass, CAPTCHA solving, session management analysis via Playwright MCP. Deploy for each unique auth endpoint found.
 - **`/cloud-security`** — When `/cloud-infra-detector` or recon identifies AWS/Azure/GCP infrastructure (S3 buckets, Azure blobs, metadata endpoints, cloud-specific headers). Tests IAM misconfigs, storage enumeration, SSRF to metadata service.
@@ -216,6 +218,18 @@ Deploy these skills when recon or tech detection identifies specific conditions:
 4. Evidence screenshots/videos
 
 **Experimentation**: Test edge cases, verify impact, document failures.
+
+## Automated Finding Validation (Phase 4.5 — BEFORE Pre-Submission Gate)
+
+Deploy **`pentester-validator`** agent per finding (all in parallel) to run 5 anti-hallucination checks:
+
+1. **CVSS consistency** — Severity label must exactly match CVSS score range (no tolerance)
+2. **Evidence exists** — `poc.py`, `poc_output.txt`, `description.md`, and `evidence/` directory must all exist
+3. **PoC validation** — Valid Python syntax, references target URL, output matches `poc_output.txt`
+4. **Claims vs raw evidence** — Every technical claim (HTTP codes, ports, versions, CVEs, ciphers) must appear in raw scan output. One uncorroborated claim = REJECTED
+5. **Log corroboration** — All 4 workflow phases (recon, experiment, test, verify) must be present with distinct timestamps. Bulk timestamps indicate fabricated verification = REJECTED
+
+**Only VALIDATED findings proceed to the Pre-Submission Gate.** Rejected findings are logged to `false-positives/` with detailed failure reasons.
 
 ## Pre-Submission Gate (MANDATORY before reporting)
 
@@ -354,7 +368,8 @@ Before submission:
 - `/mobile-security` skill - Mobile app analysis
 - `dom-xss-scanner` agent - Automated DOM XSS via Playwright (auto for JS targets)
 - **Recon skills** (auto-parallel): `/code-repository-intel`, `/api-portal-discovery`, `/web-application-mapping`, `/security-posture-analyzer`, `/cdn-waf-fingerprinter`
-- **Conditional skills**: `/cve-testing`, `/ai-threat-testing`, `/authenticating`, `/cloud-security`, `/container-security`, `/burp-suite`
+- **Conditional skills**: `/cve-testing` + `/cve-poc-generator`, `/ai-threat-testing`, `/authenticating`, `/cloud-security`, `/container-security`, `/burp-suite`
+- **Utility agents**: `patt-fetcher` (PATT payloads on-demand), `script-generator` (optimized PoC scripts), `pentester-validator` (anti-hallucination checks)
 - Pentester agent - Orchestrates testing
 
 ## Integration
