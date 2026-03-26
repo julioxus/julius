@@ -233,7 +233,17 @@ After all reports are written locally:
 - [ ] Upload evidence files from each finding directory
 - [ ] Write import results to outputs/defectdojo-{engagement}/reports/defectdojo-import.json
 - [ ] Verify and present summary with DD finding IDs + URLs
+- [ ] **Show post-upload disclaimer** (see below)
 ```
+
+### Post-Upload Disclaimer (MANDATORY)
+
+After every successful upload, ALWAYS display this disclaimer to the user:
+
+> **⚠️ Findings uploaded with `active=false` and `verified=false`.**
+> All vulnerabilities must be manually reviewed by the security team.
+> Until both the `active` and `verified` flags are enabled on each finding, **the corresponding JIRA ticket will NOT be created**.
+> Review each finding in DefectDojo and enable both flags after manual validation.
 
 ### Cross-References Between Findings
 
@@ -411,6 +421,8 @@ outputs/defectdojo-{engagement}/
 - **Validate DEFECTDOJO_URL + DEFECTDOJO_TOKEN before any operation**
 - **ASK USER APPROVAL BEFORE UPLOADING** — present summary table, tell user where reports are on disk, get explicit confirmation before Phase 2
 - **CREATE FINDINGS UNDER A TEST** — always create/find a test named "Manual Review" (type "Manual Code Review") in the engagement
+- **ALWAYS set `active: false` and `verified: false`** when creating findings via POST /api/v2/findings/. Findings are created as drafts — the security team activates and verifies them after their own review. Never set active=true or verified=true.
+- **EMBED SCREENSHOTS inline in `steps_to_reproduce`** — when a finding has PoC screenshot evidence, upload the screenshot file first via the files endpoint, then reference it inline within the Steps to Reproduce section at the exact step where the evidence is relevant (e.g., after the curl command, embed the screenshot showing the response). This makes the PoC self-contained and reviewable without switching to the evidence tab.
 - Map CWE IDs accurately (reference/CWE_MAPPING.md)
 - Deduplicate against existing findings
 - Upload all evidence files from finding directories
