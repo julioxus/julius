@@ -32,16 +32,21 @@ This repo provides Claude Code skills and agents for security testing, bug bount
 ## Repository Structure
 
 - `AGENTS.md` - **Passive security testing knowledge base** (always loaded)
-- `.claude/skills/` - **Workflow orchestration skills** (user-triggered), grouped by category:
-  - `pentest/` - Core pentesting (11 attack categories, 186 docs)
-  - `offensive/` - Targeted testing (SAST, CVE, auth, AI threats)
-  - `recon/` - Reconnaissance (10 skills)
-  - `detection/` - Technology detection (15 skills)
-  - `bounty/` - Bug bounty platforms + shared workflows
-  - `infrastructure/` - Cloud, container, mobile security
-  - `tools/` - Burp Suite, HexStrike, DefectDojo integrations
-  - `reporting/` - Evidence formatting and report export
-  - `skiller/` - Skill creation and management
+- `.claude/skills/` - **Workflow orchestration skills** (user-triggered):
+  - **Orchestrators** (top-level for slash command discovery):
+    - `pentest/` - Canonical testing engine (11 attack categories, 186 docs)
+    - `hackerone/` - HackerOne bug bounty orchestrator
+    - `intigriti/` - Intigriti bug bounty orchestrator
+    - `defectdojo/` - DefectDojo vulnerability management orchestrator
+  - **Categories** (supporting skills):
+    - `offensive/` - Targeted testing (SAST, CVE, auth, AI threats)
+    - `recon/` - Reconnaissance (10 skills)
+    - `detection/` - Technology detection (15 skills)
+    - `bounty/` - Shared bounty pipelines (recon, validation, mobile)
+    - `infrastructure/` - Cloud, container, mobile security
+    - `tools/` - Burp Suite, HexStrike integrations
+    - `reporting/` - Evidence formatting and report export
+    - `skiller/` - Skill creation and management
 - `.claude/agents/` - Reusable specialized agents (DOM XSS, validator, script-gen, etc.)
 - `tools/` - External tool installers (Playwright, Kali, RecoX)
 - `templates/` - Skill templates

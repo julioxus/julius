@@ -318,13 +318,16 @@ julius/
 ├── CLAUDE.md                        # Repository instructions
 ├── .claude/
 │   ├── skills/
-│   │   ├── pentest/                 # 11 attack categories, 186 docs
+│   │   ├── pentest/                 # Canonical testing engine (11 attack categories, 186 docs)
+│   │   ├── hackerone/               # HackerOne orchestrator (scope → recon → /pentest → submit)
+│   │   ├── intigriti/               # Intigriti orchestrator (API scope → recon → /pentest → submit)
+│   │   ├── defectdojo/              # DefectDojo orchestrator (scope analysis → /pentest → upload)
 │   │   ├── offensive/               # SAST, CVE, auth, AI threats (6 skills)
 │   │   ├── recon/                   # Reconnaissance (10 skills)
 │   │   ├── detection/               # Technology detection (15 skills)
-│   │   ├── bounty/                  # HackerOne, Intigriti, shared pipelines (5 skills)
+│   │   ├── bounty/                  # Shared bounty pipelines: recon, validation, mobile (3 skills)
 │   │   ├── infrastructure/          # Cloud, container, mobile (3 skills)
-│   │   ├── tools/                   # Burp Suite, HexStrike, DefectDojo (3 skills)
+│   │   ├── tools/                   # Burp Suite, HexStrike (2 skills)
 │   │   ├── reporting/               # Formatters and exporters (3 skills)
 │   │   └── skiller/                 # Skill creation
 │   └── agents/                      # 6 reusable agents
