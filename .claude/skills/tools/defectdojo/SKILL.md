@@ -1,11 +1,11 @@
 ---
 name: defectdojo
-description: DefectDojo vulnerability management automation - authenticates via API, creates products/engagements, imports pentest findings with CWE mapping, uploads evidence, and syncs validated PoCs. Use when reporting findings to DefectDojo or managing vulnerability lifecycle.
+description: DefectDojo security assessment orchestrator - analyzes engagement scope (SAST + DAST), invokes /pentest as testing engine, converts findings to DefectDojo format, and uploads via API. Also imports existing findings from pentests, bug bounty, scanners, and source code scanning.
 ---
 
-# DefectDojo Vulnerability Reporting
+# DefectDojo Security Assessment & Vulnerability Reporting
 
-Automates DefectDojo workflows: API auth → product/engagement setup → finding import → evidence upload → validation.
+Orchestrates security assessments driven by DefectDojo engagements: API auth → scope analysis → testing via /pentest → finding conversion → local validation → upload. Also imports existing findings from other sources.
 
 ## API Authentication (MANDATORY - ALWAYS FIRST)
 
@@ -62,12 +62,14 @@ python tools/iap_browser_auth.py --clear
 ```
 1. Validate DEFECTDOJO_URL + DEFECTDOJO_TOKEN (see above)
 2. Input: Product name + engagement name (or IDs)
-3. Perform security review / testing
-4. WRITE LOCAL REPORTS to outputs/defectdojo-{engagement}/findings/finding-NNN/report.md
-5. Present summary table → user validates locally
-6. AskUserQuestion: approve upload to DefectDojo
-7. Import approved findings via API with evidence uploads
-8. Verify import and present summary
+3. Analyze engagement scope from DefectDojo API (determine SAST, DAST, or both)
+4. Invoke /pentest in sub-orchestrator mode for active testing
+5. Convert /pentest findings to DefectDojo report.md format (YAML frontmatter)
+6. Run reproducibility review on all local reports
+7. Present summary table → user validates locally
+8. AskUserQuestion: approve upload to DefectDojo
+9. Import approved findings via API with evidence uploads
+10. Verify import and present summary
 ```
 
 ## Phase 1: Local Report Generation (MANDATORY BEFORE ANY API UPLOAD)
@@ -293,23 +295,56 @@ When a finding references another finding, and both are being uploaded:
 
 ## Workflows
 
-**Option 1: Security Code Review (New Engagement)**
-```
-Phase 1 — Local:
-- [ ] Validate API credentials
-- [ ] Fetch engagement details via API (product, repo, branch, scope)
-- [ ] Perform security review of the codebase/changes
-- [ ] Create outputs/defectdojo-{engagement}/ directory structure
-- [ ] Write each finding as finding-NNN/report.md with frontmatter
-- [ ] Include evidence (code snippets, HTTP logs, PoC scripts) in each finding dir
-- [ ] Present summary table → user validates locally
+**Option 1: Security Assessment (Active Testing via /pentest)**
 
-Phase 2 — Upload (after user approval):
+This is the primary orchestration workflow. DefectDojo analyzes the engagement scope and invokes `/pentest` as the testing engine.
+
+```
+Phase 0 — Scope Analysis:
+- [ ] Validate API credentials
+- [ ] Fetch engagement: GET /api/v2/engagements/{id}/ → dates, description, type, status
+- [ ] Fetch product: GET /api/v2/products/{product_id}/ → name, description, prod_type
+- [ ] Determine test_types from engagement metadata:
+      - Description contains repo URL, branch, or "code review" → ["sast"]
+      - Description contains target URLs, endpoints, or "penetration" → ["dast"]
+      - Both present → ["sast", "dast"]
+      - Unclear → AskUserQuestion: "What type of testing? [SAST / DAST / Both]"
+- [ ] Extract targets from engagement description (URLs, repos, IP ranges)
+- [ ] Build scope contract for /pentest
+
+Phase 1 — Testing (invoke /pentest):
+- [ ] Invoke /pentest in sub-orchestrator mode with:
+      targets: [extracted from engagement metadata]
+      engagement_name: "defectdojo-{engagement-slug}"
+      output_base: "outputs/defectdojo-{engagement}/"
+      context:
+        platform: "defectdojo"
+        test_types: [determined in Phase 0]
+- [ ] /pentest runs Phase 2 (recon, unless skipped), Phase 3 (user approves plan),
+      Phase 4 (deploy executors — SAST and/or DAST), Phase 5 (aggregate findings)
+- [ ] Findings land in outputs/defectdojo-{engagement}/processed/findings/
+
+Phase 2 — Local Reports (convert to DefectDojo format):
+- [ ] Read findings from outputs/defectdojo-{engagement}/processed/findings/
+- [ ] Convert each finding to DefectDojo report.md format:
+      - Add YAML frontmatter (title, cwe, cvssv3, severity, static/dynamic flags)
+      - For DAST findings: add endpoint field (valid URL)
+      - For SAST findings: add file_path, line, sast_source_* fields
+      - Map CWE using reference/CWE_MAPPING.md
+      - CVSS score MUST be computed programmatically
+- [ ] Write to outputs/defectdojo-{engagement}/findings/finding-NNN/report.md
+- [ ] Copy evidence files from processed/findings/ to findings/finding-NNN/evidence/
+- [ ] Run reproducibility review (see Developer Reproducibility Review below)
+- [ ] Present summary table → user validates locally
+- [ ] AskUserQuestion: approve upload
+
+Phase 3 — Upload (after user approval):
 - [ ] Parse validated report.md files
 - [ ] Deduplicate against existing DD findings
 - [ ] Create "Manual Review" test in engagement
 - [ ] Import approved findings with evidence
 - [ ] Write defectdojo-import.json with DD IDs
+- [ ] Show post-upload disclaimer
 ```
 
 **Option 2: Import from Existing Pentest Findings**
@@ -427,8 +462,8 @@ Every finding MUST be written as a local `report.md` file first (see Phase 1). T
 
 ## Engagement Types
 
-- **Interactive**: Manual pentest (use for /pentest, /hackerone, /intigriti results)
-- **CI/CD**: Automated scans (use for nuclei, ZAP, Burp scan imports)
+- **Interactive**: Manual pentest (use for Option 1 active testing, /pentest, /hackerone, /intigriti results)
+- **CI/CD**: Automated scans (use for nuclei, ZAP, Burp scan imports via Option 3)
 
 ## Supported Scanner Imports
 
@@ -493,6 +528,8 @@ outputs/defectdojo-{engagement}/
 
 ## Tools
 
+- `/pentest` skill - Testing engine (invoked in sub-orchestrator mode for Option 1)
+- `/bounty-validation` skill - Finding validation gate (optional, for quality assurance)
 - `tools/iap_browser_auth.py` - IAP cookie acquisition via Playwright (cache → browser login)
 - `tools/finding_importer.py` - Import findings to DefectDojo API
 - `tools/scanner_mapper.py` - Map scanner output to DD import format

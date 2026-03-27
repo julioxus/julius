@@ -1,11 +1,11 @@
 ---
 name: bounty-validation
-description: Shared bug bounty validation pipeline - PoC validation requirements, automated finding validation (anti-hallucination), pre-submission gate (OOS check, business logic verification, developer reproducibility review), AI usage compliance, and quality checklist. Referenced by /intigriti and /hackerone.
+description: Shared validation pipeline - PoC validation requirements, automated finding validation (anti-hallucination), pre-submission gate (OOS check, business logic verification, developer reproducibility review), AI usage compliance, and quality checklist. Referenced by /intigriti, /hackerone, and /defectdojo.
 ---
 
 # Bug Bounty Validation Pipeline
 
-Shared validation, compliance, and quality logic for bug bounty platforms. Invoked by `/intigriti` and `/hackerone` after testing completes.
+Shared validation, compliance, and quality logic for security testing platforms. Invoked by `/intigriti` and `/hackerone` after testing completes. Also available to `/defectdojo` for finding quality assurance before upload.
 
 ## PoC Validation (CRITICAL)
 
@@ -44,7 +44,20 @@ Deploy **`pentester-validator`** agent per finding (all in parallel) to run 5 an
    - **Document your conclusion**: In the finding, explicitly state why this behavior is NOT by design. If you cannot articulate a clear reason, DO NOT report it.
    - **When in doubt, ASK the user** before reporting — a "by design" rejection wastes everyone's time and damages researcher reputation.
 3. **Submission requirements check**: Does the report include everything the program requires? Read the program's submission requirements — each program has its own (e.g., role used, raw HTTP requests, affected plans, reproduction steps).
-4. **Impact honesty check**: Does the claimed severity match the demonstrated impact? Don't inflate.
+4. **Impact honesty check (CRITICAL — prevents inflated/rejected reports)**:
+   - **Confirmed vs theoretical**: Does the report claim impact that was actually demonstrated? If the report says "account takeover" but only showed an IDOR read, the severity is inflated. The CVSS must reflect CONFIRMED impact, with theoretical maximum documented separately in the report body.
+   - **Environment defenses factored in**: Was CVSS adjusted for real defenses? Check:
+     - WAF present → is Attack Complexity set to AC:H? Were bypass attempts documented?
+     - CSP blocks script execution → is XSS impact downgraded if no bypass was found?
+     - Rate limiting in place → is brute-force/DoS impact realistic?
+     - Auth required → is Privileges Required correct (PR:L/PR:H, not PR:N)?
+     - Network segmentation → is Scope S:U unless cross-boundary was proven?
+   - **"Prove it or downgrade it" verification**: For each high-impact claim, check that evidence exists:
+     - ATO claim → evidence shows actual login as victim or session hijack
+     - RCE claim → evidence shows command output on target
+     - Data exfil claim → evidence shows retrieved data (redacted)
+     - If evidence is missing for a claim: **REJECT and send back to /pentest Phase 5.5** to either prove the claim or rewrite the finding with confirmed-only impact
+   - **Mitigations documented**: Does the report acknowledge defenses that affect real-world exploitability? Reports that ignore obvious mitigations (e.g., claiming Critical SSRF when cloud metadata is blocked by IMDSv2) get rejected by triagers.
 5. **Developer reproducibility review**: For EACH finding, verify:
    - All URLs in Steps to Reproduce are FULL (https://...), never relative
    - Auth method explained (how to get tokens/cookies)
