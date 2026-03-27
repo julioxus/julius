@@ -23,7 +23,7 @@ Built on top of [Transilience AI Community Tools](https://github.com/transilienc
 | | |
 |-|-|
 | **48 skills** | Pentesting, recon, bug bounty, vendor assessment, cloud, mobile, SAST, reporting |
-| **6 agents** | DOM XSS scanner, finding validator, script generator, payload fetcher, HackTheBox, skill creator |
+| **8 agents** | Orchestrator, executor, validator, DOM XSS scanner, script generator, payload fetcher, HackTheBox, skill creator |
 | **186 attack docs** | PortSwigger Academy solutions, cheat sheets, methodology guides |
 | **2 bug bounty platforms** | HackerOne, Intigriti |
 | **Vulnerability management** | DefectDojo orchestrator (scope analysis, SAST/DAST via /pentest, API import) |
@@ -69,29 +69,40 @@ The primary use case. Two entry points depending on platform:
 
 3. TESTING (/pentest in sub-orchestrator mode — Phase 3-5)
    ├── Phase 3: Attack plan from recon + recommendations → user approves
-   ├── Phase 4: Deploy executors in parallel (tier-prioritized):
-   │   ├── Pentester agents: 40+ attack types across 11 categories
+   ├── Phase 4: pentester-orchestrator dispatches parallel executor batches:
+   │   ├── pentester-executor agents (3-5 per batch, up to 15 concurrent, 100 max):
+   │   │   ├── 40+ attack types across 11 categories
+   │   │   ├── 3+ escalation levels per test (quickstart → cheat-sheet → patt-fetcher)
+   │   │   └── Each produces writeup-style findings with inline visual evidence
    │   ├── DOM XSS scanner: auto for JS-heavy targets (React, Vue, Angular)
    │   ├── Conditional skills: /cve-testing, /source-code-scanning, /ai-threat-testing,
    │   │   /authenticating, /cloud-security, /container-security, /burp-suite
-   │   ├── patt-fetcher + script-generator agents for payloads and PoCs
    │   └── /mobile-security: MobSF + Frida for mobile assets
-   └── Phase 5: Aggregate, deduplicate, identify chains
+   └── Phase 5: Aggregate findings, deduplicate, identify chains
 
-4. IMPACT ESCALATION (/pentest Phase 5.5)
-   ├── Chain exploitation: SSRF→metadata→creds, XSS+CSRF→ATO, IDOR+email change→takeover
-   ├── Privilege escalation: user→admin, authenticated→unauthenticated
-   ├── Scope widening: Tier 3 vuln → test on Tier 1, subdomain A → subdomain B
-   ├── Impact amplification: reflected→stored XSS, blind→full-read SSRF
-   ├── Re-deploy executors if escalation opens new attack surface
-   └── Severity re-assessment: CVSS adjusted for real environment
-       ├── WAF, CSP, rate limiting, network segmentation → CVSS modifiers
-       └── "Prove it or downgrade it": demonstrate claimed impact or lower severity
+4. IMPACT ESCALATION (/pentest Phase 5.5 — 3 rounds, early stop if no new findings)
+   ├── Round 1: Chain exploitation + privilege escalation on initial findings
+   │   ├── SSRF→metadata→creds, XSS+CSRF→ATO, IDOR+email change→takeover
+   │   └── user→admin, authenticated→unauthenticated, read→write/delete
+   ├── Round 2: Scope widening + impact amplification using Round 1 results
+   │   ├── Tier 3 vuln → test on Tier 1, subdomain A → subdomain B
+   │   └── reflected→stored XSS, blind→full-read SSRF
+   ├── Round 3: Deep chains + severity re-assessment on ALL findings
+   │   ├── Multi-step chains from Rounds 1-2 results (new attack surface)
+   │   └── CVSS adjusted for real environment (WAF, CSP, rate limiting)
+   │       └── "Prove it or downgrade it": demonstrate claimed impact or lower severity
+   └── Re-deploy executors in each round if escalation opens new attack surface
+
+4b. FINDING VALIDATION (/pentest Phase 5.6 — after all 3 escalation rounds)
+   ├── pentester-validator (per-finding, all in parallel — including escalated chains):
+   │   ├── 5 anti-hallucination checks (CVSS, evidence, PoC, claims vs raw data, logs)
+   │   ├── Inline evidence verification (screenshots embedded in writeup, not just referenced)
+   │   ├── Chain evidence check: every intermediate step must have request/response
+   │   └── Rejected findings → data/false-positives/ (preserved, excluded from report)
+   └── Only validated findings proceed to submission or reporting
 
 5. VALIDATION (/bounty-validation)
-   ├── pentester-validator agent (5 anti-hallucination checks per finding):
-   │   CVSS consistency, evidence existence, PoC syntax, claims vs evidence, log corroboration
-   ├── Pre-submission gate:
+   ├── Pre-submission gate (on top of Phase 5.6 validation):
    │   ├── OOS check (general + mobile-specific exclusions)
    │   ├── Business logic verification: is this "by design"?
    │   ├── Impact honesty: confirmed vs theoretical, environment defenses factored in
@@ -107,6 +118,7 @@ The primary use case. Two entry points depending on platform:
 ### Bug bounty rules (enforced)
 
 - **No PoC = No Report** — Every finding needs a working exploit demo
+- **Writeup-style evidence** — Every finding is a self-contained writeup: screenshots embedded inline (`![caption](evidence/screenshot.png)`), HTTP request/response as code blocks, PoC code inline. Validator rejects findings that only reference evidence as file paths.
 - **Prove it or downgrade it** — Claimed impact must be demonstrated with evidence, or severity is lowered to confirmed-only impact
 - **CVSS must be calculated** — Never guessed. Computed with Python/bash calculator, adjusted for real environment (WAF, CSP, rate limiting)
 - **Business logic verification** — Verify findings are not "by design" before reporting
@@ -141,10 +153,12 @@ Full security assessment orchestrator driven by DefectDojo engagements. Analyzes
 
 3. TESTING (Phase 1 — invoke /pentest in sub-orchestrator mode)
    ├── /pentest receives scope contract with test_types from Phase 0
-   ├── SAST: deploys /source-code-scanning (OWASP Top 10, CWE Top 25, secrets)
-   ├── DAST: deploys attack agents (Pentester, dom-xss-scanner, etc.)
+   ├── pentester-orchestrator dispatches parallel executor batches:
+   │   ├── SAST: /source-code-scanning (OWASP Top 10, CWE Top 25, secrets)
+   │   └── DAST: pentester-executor agents + dom-xss-scanner
+   ├── Phase 4.5: pentester-validator (per-finding, inline evidence check)
    ├── Phase 5.5: Impact escalation + severity re-assessment
-   └── Findings land in outputs/defectdojo-{engagement}/processed/findings/
+   └── Findings (writeup-style) land in outputs/defectdojo-{engagement}/processed/findings/
 
 4. LOCAL REPORTS (Phase 2 — convert to DefectDojo format)
    ├── Convert /pentest findings to report.md with YAML frontmatter
@@ -201,7 +215,9 @@ sast_sink_object: "Http::get()"
 /defectdojo → /pentest            # Sub-orchestrator: receives scope with SAST/DAST types
 ```
 
-Canonical testing engine. Runs standalone or as sub-orchestrator invoked by `/hackerone`, `/intigriti`, and `/defectdojo`. 7 phases (0→1→2→3→4→5→5.5→6), 40+ attack types across 11 categories:
+Canonical testing engine. Runs standalone or as sub-orchestrator invoked by `/hackerone`, `/intigriti`, and `/defectdojo`. 8 phases (0→1→2→3→4→4.5→5→5.5→6), 40+ attack types across 11 categories.
+
+**Agent architecture**: `/pentest` delegates to `pentester-orchestrator` (pure manager, dispatches parallel batches) → `pentester-executor` agents (thin runners, 3+ escalation levels) → `pentester-validator` (per-finding, 5 mandatory checks). The orchestrator runs up to 15 concurrent executors and 100 total experiments before stopping.
 
 | Category | Types |
 |----------|-------|
@@ -268,12 +284,27 @@ Each attack type has PortSwigger Academy solutions, cheat sheets, and methodolog
 
 ## Agents
 
+8 specialized agents in `.claude/agents/`, coordinated by shared rules in `agents/CLAUDE.md` (artifact discipline, credential loading, output structure).
+
+### Core testing pipeline
+
+```
+pentester-orchestrator → pentester-executor (×N parallel) → pentester-validator (×N parallel)
+```
+
+| Agent | Role | Tools |
+|-------|------|-------|
+| **pentester-orchestrator** | Pure manager. Plans, dispatches parallel executor batches (up to 15 concurrent, 100 max experiments), adapts based on results, loops until critical found or exhausted. Never executes directly. | Agent, Task* |
+| **pentester-executor** | Thin runner. Receives missions with objectives + skill folder, loads attack docs, tries 3+ escalation levels, produces writeup-style findings with inline evidence. | Bash, Read, Write, Agent, Glob, Grep |
+| **pentester-validator** | Anti-hallucination gate. 5 mandatory checks per finding: CVSS consistency, real evidence (visual for browser vulns), PoC syntax, claims vs raw data, log corroboration. Also verifies inline evidence in description.md (writeup format). | Bash, Read, Write, Glob, Grep |
+
+### Support agents
+
 | Agent | Purpose |
 |-------|---------|
-| **dom-xss-scanner** | Injects canary tokens through DOM sources, hooks sinks, detects taint flow |
-| **pentester-validator** | Anti-hallucination: CVSS consistency, evidence existence, PoC syntax, claims corroboration |
+| **dom-xss-scanner** | Injects canary tokens through DOM sources, hooks sinks, detects taint flow via Playwright |
 | **script-generator** | Generates parallelized, syntax-validated PoC scripts (>30 lines) |
-| **patt-fetcher** | Fetches PayloadsAllTheThings payloads on demand (30+ categories) |
+| **patt-fetcher** | Fetches PayloadsAllTheThings payloads on demand when local payloads exhausted |
 | **hackthebox** | Orchestrates HackTheBox challenges — VPN, login, solving, writeup |
 | **skiller** | Automated skill directory creation and validation |
 
@@ -341,7 +372,13 @@ julius/
 │   │   ├── tools/                   # Burp Suite, HexStrike (2 skills)
 │   │   ├── reporting/               # Formatters and exporters (3 skills)
 │   │   └── skiller/                 # Skill creation
-│   └── agents/                      # 6 reusable agents
+│   ├── agents/                      # 8 specialized agents
+│   │   ├── CLAUDE.md                # Shared rules (artifact discipline, credentials, interaction model)
+│   │   ├── pentester-orchestrator   # Pure manager: parallel batches, adaptation loops
+│   │   ├── pentester-executor       # Thin runner: missions, escalation, writeup evidence
+│   │   ├── pentester-validator      # 5-check anti-hallucination + inline evidence verification
+│   │   └── reference/               # Output structure + test plan templates
+│   └── tools/                       # env-reader.py (credential loading utility)
 ├── tools/                           # Playwright, Kali, RecoX installers
 ├── outputs/                         # Engagement outputs (gitignored)
 └── CONTRIBUTING.md
