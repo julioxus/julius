@@ -1,11 +1,13 @@
 ---
 name: bounty-recon
-description: Shared bug bounty reconnaissance pipeline - post-enumeration recon (httpx, naabu, ffuf, nuclei), extended recon (parallel skill deployment), conditional specialized testing triggers, agent deployment patterns (pentester, DOM XSS), and chain discovery. Referenced by /intigriti and /hackerone.
+description: Shared bug bounty reconnaissance pipeline - prioritization, endpoint recon, post-enumeration recon (httpx, naabu, ffuf, nuclei), extended recon (parallel skill deployment), and testing recommendations. Produces recon data and testing plan consumed by /pentest. Referenced by /intigriti and /hackerone.
 ---
 
 # Bug Bounty Recon Pipeline
 
-Shared reconnaissance and agent deployment logic for bug bounty platforms. Invoked by `/intigriti` and `/hackerone` after scope parsing.
+Shared reconnaissance pipeline for bug bounty platforms. Invoked by `/intigriti` and `/hackerone` after scope parsing. Produces recon data and testing recommendations consumed by `/pentest` in sub-orchestrator mode.
+
+**This skill does NOT deploy testing agents.** It performs recon only and outputs a `testing_recommendations.md` file that `/pentest` uses to build its attack plan.
 
 ## Bounty-Driven Prioritization (MANDATORY FIRST STEP)
 
@@ -70,47 +72,80 @@ Deploy these skills **in parallel** during recon to expand attack surface and in
 5. **`/cdn-waf-fingerprinter`** — Identify CDN (Cloudflare, Akamai, Fastly) and WAF. Critical for: filtering ffuf results, selecting XSS payloads that bypass WAF rules, identifying origin IP bypass opportunities.
 6. **`/hexstrike`** — Deploy HexStrike AI (150+ tools) for parallel recon automation: nmap, nuclei, gobuster, subfinder, httpx, and more. Especially useful for large scope with many assets.
 
-**Feed results to pentester agents**: All discovered endpoints, API specs, security posture data, and WAF fingerprints are passed as context to each Pentester agent to enable targeted testing.
+**Feed results to /pentest**: All discovered endpoints, API specs, security posture data, and WAF fingerprints are included in the testing recommendations for `/pentest` to consume during Phase 3 (Planning & Approval).
 
-## Agent Deployment
+## Testing Recommendations (output for /pentest)
 
-**Pentester Agent** per asset (tier-prioritized):
-- Tier 1 / highest-bounty assets: Deploy first, allocate most resources
-- Tier 2-3 assets: Deploy in parallel, standard resources
-- Tier 4-5 / lowest assets: Deploy last, lower priority
-- Has access to `patt-fetcher` agent for on-demand PayloadsAllTheThings payloads (30+ categories: SQLi, XSS, SSTI, SSRF, deserialization, OAuth, etc.)
-- Has access to `script-generator` agent for optimized PoC scripts (>30 lines, parallelized, syntax-validated)
+After recon completes, produce a `testing_recommendations.md` file at `{output_base}/processed/reconnaissance/testing_recommendations.md`. This file is consumed by `/pentest` in sub-orchestrator mode during Phase 3 to build the attack plan.
 
-**Mobile assets**: Deploy `/mobile-security` skill agents after app download (see `/mobile-app-acquisition`)
+### Contents
 
-**DOM XSS scanning (AUTOMATIC for JS-heavy targets)**:
-When httpx tech-detect or page analysis reveals JavaScript frameworks (React, Vue, Angular, jQuery, Next.js, Nuxt, SvelteKit) or the target is a SPA:
-- Deploy `dom-xss-scanner` agent **in parallel** with the Pentester agent for that asset
-- The scanner hooks sinks (innerHTML, document.write, eval, jQuery.html), injects canaries through all DOM sources, and detects taint flow automatically
-- Findings feed back into the Pentester agent's results for chain analysis
-- Trigger criteria: httpx `tech-detect` output contains JS framework names, OR page has `<div id="app">`, `data-reactroot`, `ng-app`, `[data-v-]`, OR `Content-Type` indicates SPA (HTML shell + JS bundles)
+```markdown
+# Testing Recommendations for {program}
 
-**Parallel Execution**:
-- N assets = N Pentester Orchestrators + dom-xss-scanner where applicable
-- Each spawns specialized agents
-- Tier 1 findings reviewed first
-- Mobile app analysis + DOM XSS scanning run alongside web testing
+## Asset Priority (tier-based)
+| Asset | Type | Tier | Priority | Notes |
+|-------|------|------|----------|-------|
+| api.target.com | API | 1 | Highest | Main API, $5k critical |
+| app.target.com | Web App | 2 | High | React SPA |
+| *.target.com | Wildcard | 3 | Medium | 12 live subdomains |
 
-## Conditional Specialized Testing (AUTOMATIC based on recon results)
+## Detected Technologies → Recommended Attacks
+- api.target.com: Node.js + Express → injection, SSRF, prototype pollution
+- app.target.com: React 18.2 + Next.js → DOM XSS, CSRF, client-side attacks
 
-Deploy these skills when recon or tech detection identifies specific conditions:
+## DOM XSS Candidates
+Assets where httpx detected JS frameworks (React, Vue, Angular, jQuery, Next.js, Nuxt, SvelteKit)
+or SPA indicators (`<div id="app">`, `data-reactroot`, `ng-app`, `[data-v-]`):
+- app.target.com — React 18.2, SPA confirmed → deploy dom-xss-scanner
 
-- **`/cve-testing`** + **`/cve-poc-generator`** — When httpx, nuclei, or tech-detect identifies specific software versions (e.g., Apache 2.4.49, jQuery 3.4.1, Spring 5.3.x). `/cve-testing` researches known CVEs and tests with public exploits. When a CVE is confirmed, `/cve-poc-generator` creates a standalone Python PoC script + detailed report with NVD data, CVSS vector, and remediation. High-value: unpatched services on non-standard ports.
-- **`/source-code-scanning`** — When `/code-repository-intel` discovers exposed source code (public repos, leaked repos, `.git` directories, source maps). Runs SAST for OWASP Top 10 + CWE Top 25, scans dependencies for CVEs, detects hardcoded secrets (API keys, tokens, passwords), and identifies insecure patterns. Chain: exposed secrets → account takeover, dependency CVEs → RCE.
-- **`/ai-threat-testing`** — When recon discovers AI/LLM features: chatbots, AI assistants, `/api/chat`, `/api/completions`, prompt-based interfaces, or OpenAI/Anthropic SDK references in JS bundles. Tests OWASP LLM Top 10 (prompt injection, model extraction, data poisoning).
-- **`/authenticating`** — When login/signup forms are discovered. Automates credential testing, 2FA bypass, CAPTCHA solving, session management analysis via Playwright MCP. Deploy for each unique auth endpoint found.
-- **`/cloud-security`** — When `/cloud-infra-detector` or recon identifies AWS/Azure/GCP infrastructure (S3 buckets, Azure blobs, metadata endpoints, cloud-specific headers). Tests IAM misconfigs, storage enumeration, SSRF to metadata service.
-- **`/container-security`** — When Kubernetes/Docker indicators are found (K8s headers, `/healthz` endpoints, container orchestration signals, `.docker` files in repos). Tests RBAC, pod security, network policies, container escape vectors.
-- **`/burp-suite`** — When Burp Suite MCP is available. Deploy for active scanning + Collaborator OOB testing on high-value endpoints. Essential for blind XSS, blind SSRF, and out-of-band data exfiltration detection.
+## Conditional Skill Triggers
+Based on recon discoveries, recommend these specialized skills to /pentest:
 
-## Chain Discovery (DURING testing)
+- `/cve-testing` + `/cve-poc-generator` — Software versions detected: {list versions from httpx/nuclei}
+- `/source-code-scanning` — Source code exposed: {repos, .git dirs, source maps found by /code-repository-intel}
+- `/ai-threat-testing` — AI/LLM features detected: {chatbots, /api/chat, SDK references}
+- `/authenticating` — Login/signup forms found: {list auth endpoints}
+- `/cloud-security` — Cloud infrastructure detected: {S3 buckets, metadata endpoints, cloud headers}
+- `/container-security` — K8s/Docker indicators: {healthz endpoints, orchestration signals}
+- `/burp-suite` — High-value endpoints for active scanning + Collaborator OOB testing
 
-- After each finding, actively evaluate: "Can this chain with another finding to escalate severity?"
+## Chain Opportunities (identified during recon)
+- open redirect at /oauth/callback + OAuth flow = potential ATO
+- SSRF candidate at /api/proxy + cloud metadata = credential theft
+- {other chain hypotheses from recon data}
+
+## WAF/CDN Info (for payload selection)
+- Cloudflare on *.target.com — filter ffuf 403s, use CF-bypass XSS payloads
+- No WAF on api-internal.target.com — standard payloads work
+
+## Mobile Assets
+- com.target.app (Android) — downloaded via /mobile-app-acquisition → recommend /mobile-security
+```
+
+### How /pentest Consumes This
+
+1. `/pentest` reads `testing_recommendations.md` during Phase 3 (Planning & Approval)
+2. Uses asset priority to determine executor deployment order
+3. Uses conditional skill triggers to decide which specialized executors to deploy
+4. Uses DOM XSS candidates to deploy `dom-xss-scanner` agents
+5. Uses WAF/CDN info to configure payload selection
+6. Presents the combined plan to user for approval before Phase 4
+
+## Recon Output Format
+
+All recon data is written using the format defined in `/pentest/reference/RECONNAISSANCE_OUTPUT.md`:
+
+```
+{output_base}/processed/reconnaissance/
+├── inventory/                    # JSON inventories per asset type
+├── analysis/                     # Analysis reports
+├── reconnaissance_report.md      # Summary report
+└── testing_recommendations.md    # NEW: recommendations for /pentest
+```
+
+## Chain Discovery Notes
+
+Chain hypotheses identified during recon are documented in `testing_recommendations.md` for `/pentest` to evaluate during testing:
 - Common high-value chains: open redirect + OAuth = ATO, SSRF + cloud metadata = credential theft, XSS + CSRF = stored ATO
-- When a chain opportunity is identified, prioritize testing the complementary finding immediately
-- Document chain potential in findings even if the complementary vuln hasn't been confirmed yet
+- `/pentest` Phase 4 actively tests these chains and Phase 5 combines confirmed chains to maximize severity

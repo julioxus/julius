@@ -14,7 +14,7 @@
 
 ## What is Julius?
 
-Julius is a security testing toolkit built as **Claude Code skills and agents**. It provides AI-orchestrated workflows for pentesting, bug bounty programs, and vulnerability management — all invoked via slash commands inside Claude Code.
+Julius is a security testing toolkit built as **Claude Code skills and agents**. It provides AI-orchestrated workflows for pentesting, bug bounty programs, and vulnerability management — all invoked via slash commands inside Claude Code. `/pentest` is the canonical testing engine, invoked by `/hackerone`, `/intigriti`, and `/defectdojo` as sub-orchestrator.
 
 Built on top of [Transilience AI Community Tools](https://github.com/transilienceai/communitytools).
 
@@ -26,7 +26,7 @@ Built on top of [Transilience AI Community Tools](https://github.com/transilienc
 | **6 agents** | DOM XSS scanner, finding validator, script generator, payload fetcher, HackTheBox, skill creator |
 | **186 attack docs** | PortSwigger Academy solutions, cheat sheets, methodology guides |
 | **2 bug bounty platforms** | HackerOne, Intigriti |
-| **Vulnerability management** | DefectDojo integration (IAP auth, API import, evidence upload) |
+| **Vulnerability management** | DefectDojo orchestrator (scope analysis, SAST/DAST via /pentest, API import) |
 | **Tool integrations** | Burp Suite MCP, HexStrike AI (150+ tools), Playwright, Kali toolset, RecoX |
 
 ---
@@ -43,51 +43,71 @@ The primary use case. Two entry points depending on platform:
 ### What happens when you run `/intigriti` or `/hackerone`
 
 ```
-1. SCOPE PARSING
+1. SCOPE PARSING (/intigriti or /hackerone)
    Parse program scope → extract assets, tiers, bounty table, OOS list
-   Present prioritized attack plan → user approves before testing starts
+   Intigriti: Researcher API → domains, tiers, testing requirements (User-Agent, headers)
+   HackerOne: CSV → eligible assets, max severity, instructions
+   Mobile assets → /mobile-app-acquisition
 
-2. RECONNAISSANCE (bounty-recon)
+2. RECONNAISSANCE (/bounty-recon — recon only, no agent deployment)
+   ├── Bounty-driven prioritization: map vuln types → bounty amounts, rank by payout
    ├── Endpoint recon: tools/recox (Wayback, CommonCrawl, OTX, URLScan)
    ├── Post-enumeration: httpx → naabu → ffuf → nuclei
-   ├── Extended recon (parallel skills):
+   ├── Extended recon (6 skills in parallel):
    │   ├── /code-repository-intel     — GitHub/GitLab leaked secrets, CI configs
    │   ├── /api-portal-discovery      — OpenAPI/Swagger specs, dev docs
    │   ├── /web-application-mapping   — Headless browsing, endpoint discovery
    │   ├── /security-posture-analyzer — Headers, CSP, WAF, security.txt
    │   ├── /cdn-waf-fingerprinter     — CDN/WAF identification for bypass strategy
    │   └── /hexstrike                 — 150+ tools for large-scope parallel recon
-   └── Conditional triggers (based on recon results):
-       ├── /cve-testing + /cve-poc-generator  — When specific software versions found
-       ├── /source-code-scanning              — When exposed source code found
-       ├── /ai-threat-testing                 — When AI/LLM features detected
-       ├── /authenticating                    — When login forms discovered
-       ├── /cloud-security                    — When AWS/Azure/GCP infra detected
-       ├── /container-security                — When K8s/Docker indicators found
-       └── /burp-suite                        — Active scanning + Collaborator OOB
+   └── Output: testing_recommendations.md (consumed by /pentest)
+       ├── Per-asset priority, detected technologies, DOM XSS candidates
+       ├── Conditional skill triggers (CVE, SAST, AI, auth, cloud, container, Burp)
+       ├── Chain opportunities, WAF/CDN info for payload selection
+       └── Mobile assets for /mobile-security
 
-3. TESTING (parallel agents per asset, tier-prioritized)
-   ├── Pentester agents: 40+ attack types across 11 categories
-   ├── DOM XSS scanner: auto-deployed for JS-heavy targets (React, Vue, Angular)
-   ├── patt-fetcher: on-demand PayloadsAllTheThings payloads
-   ├── script-generator: PoC scripts (>30 lines, parallelized, syntax-validated)
-   └── /mobile-security: MobSF + Frida for mobile assets
+3. TESTING (/pentest in sub-orchestrator mode — Phase 3-5)
+   ├── Phase 3: Attack plan from recon + recommendations → user approves
+   ├── Phase 4: Deploy executors in parallel (tier-prioritized):
+   │   ├── Pentester agents: 40+ attack types across 11 categories
+   │   ├── DOM XSS scanner: auto for JS-heavy targets (React, Vue, Angular)
+   │   ├── Conditional skills: /cve-testing, /source-code-scanning, /ai-threat-testing,
+   │   │   /authenticating, /cloud-security, /container-security, /burp-suite
+   │   ├── patt-fetcher + script-generator agents for payloads and PoCs
+   │   └── /mobile-security: MobSF + Frida for mobile assets
+   └── Phase 5: Aggregate, deduplicate, identify chains
 
-4. VALIDATION (bounty-validation)
-   ├── Every finding requires: poc.py + poc_output.txt + evidence/
-   ├── pentester-validator agent: CVSS consistency, evidence check, PoC syntax
-   ├── Business logic verification: is this "by design"?
-   ├── OOS check: cross-reference against program exclusions
+4. IMPACT ESCALATION (/pentest Phase 5.5)
+   ├── Chain exploitation: SSRF→metadata→creds, XSS+CSRF→ATO, IDOR+email change→takeover
+   ├── Privilege escalation: user→admin, authenticated→unauthenticated
+   ├── Scope widening: Tier 3 vuln → test on Tier 1, subdomain A → subdomain B
+   ├── Impact amplification: reflected→stored XSS, blind→full-read SSRF
+   ├── Re-deploy executors if escalation opens new attack surface
+   └── Severity re-assessment: CVSS adjusted for real environment
+       ├── WAF, CSP, rate limiting, network segmentation → CVSS modifiers
+       └── "Prove it or downgrade it": demonstrate claimed impact or lower severity
+
+5. VALIDATION (/bounty-validation)
+   ├── pentester-validator agent (5 anti-hallucination checks per finding):
+   │   CVSS consistency, evidence existence, PoC syntax, claims vs evidence, log corroboration
+   ├── Pre-submission gate:
+   │   ├── OOS check (general + mobile-specific exclusions)
+   │   ├── Business logic verification: is this "by design"?
+   │   ├── Impact honesty: confirmed vs theoretical, environment defenses factored in
+   │   ├── Developer reproducibility review (copy-pasteable, no contradictions)
+   │   └── If claim lacks evidence → REJECT back to /pentest Phase 5.5
    └── AI disclosure section (mandatory)
 
-5. SUBMISSION
-   Platform-ready reports with CVSS, CWE, steps to reproduce, remediation
+6. SUBMISSION
+   Platform-ready reports (INTI_SEVERITY_NNN.md or H1_SEVERITY_NNN.md)
+   with CVSS, CWE, steps to reproduce, full evidence chain, remediation
 ```
 
 ### Bug bounty rules (enforced)
 
 - **No PoC = No Report** — Every finding needs a working exploit demo
-- **CVSS must be calculated** — Never guessed. Use Python/bash calculator
+- **Prove it or downgrade it** — Claimed impact must be demonstrated with evidence, or severity is lowered to confirmed-only impact
+- **CVSS must be calculated** — Never guessed. Computed with Python/bash calculator, adjusted for real environment (WAF, CSP, rate limiting)
 - **Business logic verification** — Verify findings are not "by design" before reporting
 - **AI disclosure mandatory** — All reports include AI usage transparency
 - **Out of scope** — CORS, missing headers, self-XSS, version disclosure, rate limiting (unless ATO), username enumeration
@@ -96,43 +116,56 @@ The primary use case. Two entry points depending on platform:
 
 ## DefectDojo Workflow
 
-Separate from bug bounty. Used for internal pentests, code reviews, and vulnerability management.
+Full security assessment orchestrator driven by DefectDojo engagements. Analyzes scope (SAST, DAST, or both), invokes `/pentest` as testing engine, converts findings to DefectDojo format, and uploads via API. Also imports existing findings from other sources.
 
 ```bash
 /defectdojo <product> [engagement]
 ```
 
-### Workflow
+### Workflow (Option 1: Active Testing)
 
 ```
 1. AUTHENTICATE
    ├── Reads DEFECTDOJO_URL + DEFECTDOJO_TOKEN env vars
    └── Google Cloud IAP auth via Playwright (cookie cache with ~1h TTL)
 
-2. TESTING (using /pentest, /source-code-scanning, or manual review)
-   Run your security assessment — pentest, code review, or scan
+2. SCOPE ANALYSIS (Phase 0 — determine test types from engagement)
+   ├── Fetch engagement details from DefectDojo API
+   ├── Fetch product metadata (name, description, prod_type)
+   └── Determine test_types:
+       ├── Repo URL or "code review" in description → SAST
+       ├── Target URLs or "penetration" in description → DAST
+       ├── Both present → SAST + DAST
+       └── Unclear → ask user
 
-3. LOCAL REPORTS (Phase 1 — always before any upload)
-   ├── Each finding → outputs/defectdojo-{engagement}/findings/finding-NNN/report.md
-   ├── YAML frontmatter: title, cwe, cvssv3, severity, endpoint or file_path
-   ├── Markdown body: Description, Impact, Steps to Reproduce, Mitigation
-   ├── Evidence: screenshots, PoC scripts, HTTP logs in evidence/
+3. TESTING (Phase 1 — invoke /pentest in sub-orchestrator mode)
+   ├── /pentest receives scope contract with test_types from Phase 0
+   ├── SAST: deploys /source-code-scanning (OWASP Top 10, CWE Top 25, secrets)
+   ├── DAST: deploys attack agents (Pentester, dom-xss-scanner, etc.)
+   ├── Phase 5.5: Impact escalation + severity re-assessment
+   └── Findings land in outputs/defectdojo-{engagement}/processed/findings/
+
+4. LOCAL REPORTS (Phase 2 — convert to DefectDojo format)
+   ├── Convert /pentest findings to report.md with YAML frontmatter
+   ├── DAST findings: title, cwe, cvssv3, severity, endpoint (valid URL)
+   ├── SAST findings: title, cwe, cvssv3, severity, file_path, line, sast_source_*
+   ├── Reproducibility review on all reports
    └── Present summary table → user reviews locally
 
-4. UPLOAD (Phase 2 — only after explicit user approval)
+5. UPLOAD (Phase 3 — only after explicit user approval)
    ├── Create "Manual Review" test in engagement
    ├── Import findings with CWE mapping and evidence
    ├── Findings created as active=false, verified=false (user reviews in DD)
    └── Deduplication against existing findings
 ```
 
-### Finding sources DefectDojo supports
+### Other import options (no active testing)
 
 | Source | How |
 |--------|-----|
-| Manual pentest | Option 1: Security code review → local reports → upload |
-| Pentest findings | Option 2: Read from `outputs/{engagement}/findings/` |
+| Existing pentest findings | Option 2: Read from `outputs/{engagement}/findings/` |
 | Scanner output | Option 3: Reimport nuclei, ZAP, Burp, Trivy, Semgrep, etc. (150+ formats) |
+| Bug bounty findings | Option 4: Sync from `outputs/hackerone-*` or `outputs/intigriti-*` |
 | CVE PoCs | Option 5: Import from `outputs/processed/cve-pocs/` |
 | Source code scanning | Option 6: SAST findings with `static_finding=true`, `file_path`, `sast_source_*` fields |
 
@@ -161,10 +194,13 @@ sast_sink_object: "Http::get()"
 ## Pentest Skill
 
 ```bash
-/pentest
+/pentest                          # Standalone: full 7-phase engagement
+/hackerone → /pentest             # Sub-orchestrator: receives scope, runs Phase 3-5.5
+/intigriti → /pentest             # Sub-orchestrator: receives scope + testing_requirements
+/defectdojo → /pentest            # Sub-orchestrator: receives scope with SAST/DAST types
 ```
 
-6-phase pentest orchestrator with 40+ attack types across 11 categories:
+Canonical testing engine. Runs standalone or as sub-orchestrator invoked by `/hackerone`, `/intigriti`, and `/defectdojo`. 7 phases (0→1→2→3→4→5→5.5→6), 40+ attack types across 11 categories:
 
 | Category | Types |
 |----------|-------|
@@ -246,17 +282,17 @@ cd julius
 # Open in Claude Code
 claude .
 
-# Bug bounty
+# Bug bounty (scope → recon → /pentest → validation → submission)
 /intigriti <program_url>
 /hackerone <scope_csv>
 
-# Internal pentest
+# Standalone pentest (full 7-phase engagement)
 /pentest
 
-# Import findings to DefectDojo
+# DefectDojo assessment (scope analysis → /pentest SAST/DAST → upload)
 /defectdojo <product> <engagement>
 
-# Source code review
+# Source code review (standalone SAST)
 /source-code-scanning
 ```
 

@@ -5,7 +5,7 @@ description: HackerOne bug bounty automation - parses scope CSVs, deploys parall
 
 # HackerOne Bug Bounty Hunting
 
-Automates HackerOne workflows: scope parsing → mobile app acquisition → parallel testing → PoC validation → submission reports.
+Automates HackerOne workflows: scope parsing → mobile app acquisition → recon → testing via /pentest → PoC validation → submission reports.
 
 ## Quick Start
 
@@ -13,9 +13,10 @@ Automates HackerOne workflows: scope parsing → mobile app acquisition → para
 1. Input: HackerOne program URL or CSV file
 2. Parse scope and program guidelines
 3. For mobile assets: use /mobile-app-acquisition to detect emulators and download apps
-4. Run /bounty-recon for prioritization + recon pipeline + agent deployment
-5. Run /bounty-validation for PoC validation + pre-submission gate
-6. Generate HackerOne-formatted reports
+4. Run /bounty-recon for prioritization + recon pipeline (recon only, no agent deployment)
+5. Invoke /pentest in sub-orchestrator mode (testing engine)
+6. Run /bounty-validation for PoC validation + pre-submission gate
+7. Generate HackerOne-formatted reports
 ```
 
 ## Workflows
@@ -24,10 +25,11 @@ Automates HackerOne workflows: scope parsing → mobile app acquisition → para
 ```
 - [ ] Fetch program data and guidelines
 - [ ] Download scope CSV
-- [ ] Parse eligible assets
-- [ ] Deploy agents in parallel
-- [ ] Validate PoCs
-- [ ] Generate submissions
+- [ ] Parse eligible assets into scope contract
+- [ ] Run /bounty-recon (recon only → testing_recommendations.md)
+- [ ] Invoke /pentest with scope contract (Phase 3-5)
+- [ ] Run /bounty-validation on findings
+- [ ] Generate HackerOne submission reports
 ```
 
 **Option 2: CSV File**
@@ -35,9 +37,34 @@ Automates HackerOne workflows: scope parsing → mobile app acquisition → para
 - [ ] Parse CSV scope file
 - [ ] Extract eligible_for_submission=true assets
 - [ ] Collect program guidelines
-- [ ] Deploy agents
-- [ ] Validate and generate reports
+- [ ] Run /bounty-recon (recon only → testing_recommendations.md)
+- [ ] Invoke /pentest with scope contract (Phase 3-5)
+- [ ] Run /bounty-validation on findings
+- [ ] Generate HackerOne submission reports
 ```
+
+## /pentest Invocation
+
+After `/bounty-recon` completes recon, invoke `/pentest` in sub-orchestrator mode with:
+
+```yaml
+targets: # parsed from CSV eligible assets
+  - url: "https://target.com"
+    type: "web-app"
+    tier: 1  # derived from max_severity
+    restrictions: "from CSV instruction field"
+engagement_name: "{program-name}"
+output_base: "outputs/{program}/"
+context:
+  platform: "hackerone"
+  bounty_table: {} # parsed from program page
+  oos_list: [] # parsed from program scope
+  test_types: ["dast"] # bounty programs are dynamic testing
+  recon_path: "outputs/{program}/processed/reconnaissance/"
+  testing_recommendations: "outputs/{program}/processed/reconnaissance/testing_recommendations.md"
+```
+
+`/pentest` runs Phase 3 (user approves attack plan), Phase 4 (deploy executors), Phase 5 (aggregate findings). Findings land in `outputs/{program}/processed/findings/`.
 
 ## Scope CSV Format
 
@@ -52,7 +79,8 @@ Use `tools/csv_parser.py` to parse.
 
 ## Shared Workflows
 
-- **Prioritization + Recon + Agent Deployment**: See `/bounty-recon`
+- **Prioritization + Recon**: See `/bounty-recon` (produces recon data + testing_recommendations.md)
+- **Testing Engine**: See `/pentest` (sub-orchestrator mode — receives scope contract, runs Phase 3-5)
 - **Mobile App Download**: See `/mobile-app-acquisition`
 - **Validation + Compliance + Quality**: See `/bounty-validation`
 
@@ -126,8 +154,8 @@ outputs/<program>/
 
 - `tools/csv_parser.py` - Parse HackerOne scope CSVs
 - `tools/report_validator.py` - Validate report completeness
-- `/pentest` skill - Core testing functionality
-- `/bounty-recon` skill - Recon pipeline + agent deployment
+- `/pentest` skill - Testing engine (invoked in sub-orchestrator mode)
+- `/bounty-recon` skill - Recon pipeline + testing recommendations
 - `/bounty-validation` skill - Validation + compliance + quality
 - `/mobile-app-acquisition` skill - Mobile app download from emulators
 - `/mobile-security` skill - Mobile app analysis
@@ -139,7 +167,7 @@ outputs/<program>/
 
 ## Integration
 
-Uses `/pentest` skill and Pentester agent. Follows OUTPUT.md for submission format.
+Invokes `/pentest` in sub-orchestrator mode as testing engine. Uses `/bounty-recon` for recon and `/bounty-validation` for quality gate. Follows OUTPUT.md for submission format.
 
 ## Common Rejections
 

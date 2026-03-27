@@ -5,7 +5,7 @@ description: Intigriti bug bounty automation - parses program scope from user-pr
 
 # Intigriti Bug Bounty Hunting
 
-Automates Intigriti workflows: scope parsing → tier-prioritized testing → mobile app acquisition → PoC validation → submission reports.
+Automates Intigriti workflows: scope parsing → mobile app acquisition → recon → testing via /pentest → PoC validation → submission reports.
 
 ## Quick Start
 
@@ -14,12 +14,13 @@ Automates Intigriti workflows: scope parsing → tier-prioritized testing → mo
 2. If URL provided and $INTIGRITI_PAT is set:
    → Resolve program handle to ID via Researcher API
    → Fetch domains, tiers, rules of engagement, and testing requirements
-   → Apply required User-Agent/headers from testingRequirements
+   → Extract testingRequirements (User-Agent, headers) for scope contract
 3. Parse scope: extract assets, tiers, types, and program rules
 4. For mobile assets: use /mobile-app-acquisition to detect emulators and download apps
-5. Run /bounty-recon for prioritization + recon pipeline + agent deployment
-6. Run /bounty-validation for PoC validation + pre-submission gate
-7. Generate Intigriti-formatted reports
+5. Run /bounty-recon for prioritization + recon pipeline (recon only, no agent deployment)
+6. Invoke /pentest in sub-orchestrator mode (testing engine)
+7. Run /bounty-validation for PoC validation + pre-submission gate
+8. Generate Intigriti-formatted reports
 ```
 
 ## Scope Input Methods
@@ -109,9 +110,38 @@ Intigriti uses domain-based scope (not CSV like HackerOne):
 
 Use `tools/scope_parser.py` to parse structured scope data.
 
+## /pentest Invocation
+
+After `/bounty-recon` completes recon, invoke `/pentest` in sub-orchestrator mode with:
+
+```yaml
+targets: # parsed from Researcher API domains
+  - url: "https://target.com"
+    type: "web-app"  # from domains[].type.value
+    tier: 1           # from domains[].tier.value (1=highest bounty)
+    restrictions: "from domain description"
+engagement_name: "intigriti-{program-handle}"
+output_base: "outputs/intigriti-{program}/"
+context:
+  platform: "intigriti"
+  bounty_table: {} # parsed from program rules
+  oos_list: [] # parsed from rules of engagement
+  test_types: ["dast"] # bounty programs are dynamic testing
+  testing_requirements:
+    user_agent: "from testingRequirements.userAgent"
+    request_header: "from testingRequirements.requestHeader"
+  recon_path: "outputs/intigriti-{program}/processed/reconnaissance/"
+  testing_recommendations: "outputs/intigriti-{program}/processed/reconnaissance/testing_recommendations.md"
+```
+
+**CRITICAL**: `testing_requirements` from the Researcher API MUST be propagated to all executors. `/pentest` passes these to every agent as mandatory request context.
+
+`/pentest` runs Phase 3 (user approves attack plan), Phase 4 (deploy executors), Phase 5 (aggregate findings). Findings land in `outputs/intigriti-{program}/processed/findings/`.
+
 ## Shared Workflows
 
-- **Prioritization + Recon + Agent Deployment**: See `/bounty-recon`
+- **Prioritization + Recon**: See `/bounty-recon` (produces recon data + testing_recommendations.md)
+- **Testing Engine**: See `/pentest` (sub-orchestrator mode — receives scope contract, runs Phase 3-5)
 - **Mobile App Download**: See `/mobile-app-acquisition`
 - **Validation + Compliance + Quality**: See `/bounty-validation`
 
@@ -188,8 +218,8 @@ See `reference/PLATFORM_GUIDE.md` for full comparison.
 
 - `tools/scope_parser.py` - Parse Intigriti scope from structured data
 - `tools/report_validator.py` - Validate report completeness
-- `/pentest` skill - Core testing functionality
-- `/bounty-recon` skill - Recon pipeline + agent deployment
+- `/pentest` skill - Testing engine (invoked in sub-orchestrator mode)
+- `/bounty-recon` skill - Recon pipeline + testing recommendations
 - `/bounty-validation` skill - Validation + compliance + quality
 - `/mobile-app-acquisition` skill - Mobile app download from emulators
 - `/mobile-security` skill - Mobile app analysis
