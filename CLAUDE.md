@@ -38,6 +38,7 @@ This repo provides Claude Code skills and agents for security testing, bug bount
     - `hackerone/` - HackerOne bug bounty orchestrator
     - `intigriti/` - Intigriti bug bounty orchestrator
     - `defectdojo/` - DefectDojo vulnerability management orchestrator
+    - `vendor-security-assessment/` - Third-party vendor/SDK security evaluation
   - **Categories** (supporting skills):
     - `offensive/` - Targeted testing (SAST, CVE, auth, AI threats)
     - `recon/` - Reconnaissance (10 skills)

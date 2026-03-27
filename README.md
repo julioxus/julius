@@ -22,11 +22,12 @@ Built on top of [Transilience AI Community Tools](https://github.com/transilienc
 
 | | |
 |-|-|
-| **47 skills** | Pentesting, recon, bug bounty, cloud, mobile, SAST, reporting |
+| **48 skills** | Pentesting, recon, bug bounty, vendor assessment, cloud, mobile, SAST, reporting |
 | **6 agents** | DOM XSS scanner, finding validator, script generator, payload fetcher, HackTheBox, skill creator |
 | **186 attack docs** | PortSwigger Academy solutions, cheat sheets, methodology guides |
 | **2 bug bounty platforms** | HackerOne, Intigriti |
 | **Vulnerability management** | DefectDojo orchestrator (scope analysis, SAST/DAST via /pentest, API import) |
+| **Vendor assessment** | Non-intrusive third-party security evaluation (DNS, supply chain, SAST, compliance) |
 | **Tool integrations** | Burp Suite MCP, HexStrike AI (150+ tools), Playwright, Kali toolset, RecoX |
 
 ---
@@ -218,6 +219,12 @@ Each attack type has PortSwigger Academy solutions, cheat sheets, and methodolog
 
 ## Other Skills
 
+### Vendor Security Assessment
+
+| Skill | Command | What it does |
+|-------|---------|-------------|
+| Vendor Assessment | `/vendor-security-assessment` | Non-intrusive third-party evaluation: DNS/infrastructure, supply chain (npm/pip audit, provenance, maintainer risk), SAST of open-source SDKs, compliance (SOC 2, ISO 27001), breach history. Produces executive report with scoring and approval verdict. |
+
 ### Offensive Testing
 
 | Skill | Command | What it does |
@@ -292,6 +299,9 @@ claude .
 # DefectDojo assessment (scope analysis → /pentest SAST/DAST → upload)
 /defectdojo <product> <engagement>
 
+# Vendor/SDK security evaluation (non-intrusive)
+/vendor-security-assessment <vendor_name> [package_or_url]
+
 # Source code review (standalone SAST)
 /source-code-scanning
 ```
@@ -322,6 +332,7 @@ julius/
 │   │   ├── hackerone/               # HackerOne orchestrator (scope → recon → /pentest → submit)
 │   │   ├── intigriti/               # Intigriti orchestrator (API scope → recon → /pentest → submit)
 │   │   ├── defectdojo/              # DefectDojo orchestrator (scope analysis → /pentest → upload)
+│   │   ├── vendor-security-assessment/ # Third-party vendor/SDK security evaluation
 │   │   ├── offensive/               # SAST, CVE, auth, AI threats (6 skills)
 │   │   ├── recon/                   # Reconnaissance (10 skills)
 │   │   ├── detection/               # Technology detection (15 skills)
