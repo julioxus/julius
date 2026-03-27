@@ -48,7 +48,12 @@ This repo provides Claude Code skills and agents for security testing, bug bount
     - `tools/` - Burp Suite, HexStrike integrations
     - `reporting/` - Evidence formatting and report export
     - `skiller/` - Skill creation and management
-- `.claude/agents/` - Reusable specialized agents (DOM XSS, validator, script-gen, etc.)
+- `.claude/agents/` - Reusable specialized agents (orchestrator, executor, validator, DOM XSS, script-gen, etc.)
+    - `CLAUDE.md` - Shared agent rules (artifact discipline, credential loading, interaction model)
+    - `pentester-orchestrator.md` - Pure manager: plans, dispatches parallel executor batches, adapts
+    - `pentester-executor.md` - Thin runner: receives missions, loads skills, escalates, returns results
+    - `pentester-validator.md` - Finding validator: 5 mandatory checks including real evidence verification
+    - `reference/` - Agent output structure and test plan templates
 - `tools/` - External tool installers (Playwright, Kali, RecoX)
 - `templates/` - Skill templates
 
