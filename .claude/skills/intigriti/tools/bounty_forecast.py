@@ -127,14 +127,18 @@ def forecast(report, current_rates, historical_rate=None, ai_evaluations=None):
             expected_bounty = severity_bonus_map.get(sub["severity"], 300)
 
         # Use AI evaluation if available, otherwise fall back to heuristic
-        # Calibrate AI probabilities against researcher's actual acceptance rate
-        # Platform average ~35%; if researcher is below that, discount proportionally
+        # Blend AI probability with researcher's historical acceptance rate.
+        # More closed submissions = more weight on history; fewer = trust AI more.
+        # Weight: history_weight = min(total_closed / 20, 0.5)
+        #   0 closed  → 100% AI (no data to calibrate against)
+        #   10 closed → 75% AI / 25% history
+        #   20+ closed → 50% AI / 50% history
         ai_eval = ai_by_id.get(sub.get("id"))
         if ai_eval:
             raw_prob = ai_eval["acceptance_probability"]
-            if historical_rate and historical_rate < 0.35:
-                calibration = historical_rate / 0.35
-                prob = round(raw_prob * calibration, 2)
+            if historical_rate is not None and total_closed > 0:
+                history_weight = min(total_closed / 20, 0.5)
+                prob = round(raw_prob * (1 - history_weight) + historical_rate * history_weight, 2)
             else:
                 prob = raw_prob
             prob_source = "ai"
