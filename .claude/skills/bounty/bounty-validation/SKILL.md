@@ -75,7 +75,20 @@ Deploy **`pentester-validator`** agent per finding (all in parallel) to run 5 an
 **Before submitting ANY finding, validate it passes ALL these checks:**
 
 1. **OOS check**: Re-read the program's out-of-scope list. Is this vuln type explicitly excluded? Is the asset in scope? Check BOTH the general OOS and any platform-specific OOS (mobile/desktop).
-2. **Business logic verification (CRITICAL — prevents "by design" rejections)**:
+2. **Informative likelihood gate (CRITICAL — prevents wasted submissions)**:
+   The most common rejection type is "Informative" — findings that are technically true but have no exploitable impact. Before proceeding, check the finding against these patterns:
+   - **Config disclosure without exploit chain**: Exposed version numbers, server paths, stack traces, internal IPs, pod names, debug info — unless chained into a working exploit, these are informative. Ask: "What can an attacker DO with this information alone?"
+   - **Missing security header / best practice violation**: Missing rate limiting, weak CSP, absent HSTS, verbose errors — these are hardening recommendations, not vulnerabilities, unless you can demonstrate concrete exploitation (e.g., XSS that fires because CSP is absent).
+   - **Theoretical impact only**: The report says "could lead to account takeover" or "an attacker might steal tokens" but the PoC only shows the first step. If the chain is incomplete, the triager will close as informative. **Every hop in the chain must be demonstrated.**
+   - **"Defense in depth" findings**: The finding improves security posture but the current state isn't exploitable (e.g., open redirect without token theft, CORS misconfiguration without data exfiltration PoC).
+   - **Input validation without downstream impact**: Server accepts invalid values but the values don't affect processing, compliance, or output. Prove the bad input propagates to cause harm.
+
+   **Decision**: If the finding matches any pattern above and lacks a demonstrated exploit chain, STOP. Either:
+   (a) Go back to `/pentest` Phase 5.5 to complete the exploit chain, or
+   (b) Downgrade to a building block for future chaining — do NOT submit.
+
+   **The test**: "If I were a triager spending 5 minutes on this, would I close it as informative?" If yes, it probably is.
+3. **Business logic verification (CRITICAL — prevents "by design" rejections)**:
    Before reporting any data exposure, information leak, or access control finding, verify it's NOT intended behavior:
    - **Understand the core service**: What does this company actually do? Search the company's website, About page, and marketing materials. If they are a people-search engine, exposing personal data IS the product. If they are a public registry, open access IS the feature.
    - **Check public documentation**: Read ToS, Privacy Policy, FAQ, API docs, and help pages. Do they describe or justify the behavior you found? Look for phrases like "publicly available information", "data provided by users", "open access".
@@ -84,8 +97,8 @@ Deploy **`pentester-validator`** agent per finding (all in parallel) to run 5 an
    - **Check for explicit access controls**: Is there a login wall, paywall, or robots.txt restriction that the data bypasses? If the data is freely browsable without authentication, it's likely public by design.
    - **Document your conclusion**: In the finding, explicitly state why this behavior is NOT by design. If you cannot articulate a clear reason, DO NOT report it.
    - **When in doubt, ASK the user** before reporting — a "by design" rejection wastes everyone's time and damages researcher reputation.
-3. **Submission requirements check**: Does the report include everything the program requires? Read the program's submission requirements — each program has its own (e.g., role used, raw HTTP requests, affected plans, reproduction steps).
-4. **Impact honesty check (CRITICAL — prevents inflated/rejected reports)**:
+4. **Submission requirements check**: Does the report include everything the program requires? Read the program's submission requirements — each program has its own (e.g., role used, raw HTTP requests, affected plans, reproduction steps).
+5. **Impact honesty check (CRITICAL — prevents inflated/rejected reports)**:
    - **Confirmed vs theoretical**: Does the report claim impact that was actually demonstrated? If the report says "account takeover" but only showed an IDOR read, the severity is inflated. The CVSS must reflect CONFIRMED impact, with theoretical maximum documented separately in the report body.
    - **Environment defenses factored in**: Was CVSS adjusted for real defenses? Check:
      - WAF present → is Attack Complexity set to AC:H? Were bypass attempts documented?
@@ -99,7 +112,7 @@ Deploy **`pentester-validator`** agent per finding (all in parallel) to run 5 an
      - Data exfil claim → evidence shows retrieved data (redacted)
      - If evidence is missing for a claim: **REJECT and send back to /pentest Phase 5.5** to either prove the claim or rewrite the finding with confirmed-only impact
    - **Mitigations documented**: Does the report acknowledge defenses that affect real-world exploitability? Reports that ignore obvious mitigations (e.g., claiming Critical SSRF when cloud metadata is blocked by IMDSv2) get rejected by triagers.
-5. **Developer reproducibility review**: For EACH finding, verify:
+6. **Developer reproducibility review**: For EACH finding, verify:
    - All URLs in Steps to Reproduce are FULL (https://...), never relative
    - Auth method explained (how to get tokens/cookies)
    - Every command is copy-pasteable and will work as written
@@ -112,7 +125,7 @@ Deploy **`pentester-validator`** agent per finding (all in parallel) to run 5 an
    - CVSS vector, score, and severity all computed and aligned
    - Evidence directory has real captured output (screenshots, HTTP logs, PoC scripts)
    - **Visual evidence enforced** (see Visual Evidence Standard): browser-renderable vulns MUST have Playwright screenshots; server-side vulns MUST have real curl/tool output. Simulated terminal output = REJECTED.
-6. **Present findings to user for review**: Show a summary of each finding with severity, evidence quality, OOS risk assessment, and business logic verification result. Let the user decide which to submit.
+7. **Present findings to user for review**: Show a summary of each finding with severity, evidence quality, OOS risk assessment, and business logic verification result. Let the user decide which to submit.
 
 ## AI Usage Compliance (MANDATORY)
 
@@ -151,6 +164,7 @@ Before submission:
 - [ ] Step-by-step reproduction + impact + remediation
 - [ ] Sensitive data sanitized
 - [ ] Mobile apps downloaded and analyzed (if in scope)
+- [ ] **Informative likelihood gate passed**: finding has demonstrated E2E exploit chain, not just config disclosure or theoretical impact
 - [ ] **Business logic verified: behavior is NOT by design** (checked company service, docs, competitors)
 - [ ] **AI Disclosure section included**
 - [ ] **All technical claims verified against real evidence**
