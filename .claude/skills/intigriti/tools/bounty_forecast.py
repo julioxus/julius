@@ -127,9 +127,16 @@ def forecast(report, current_rates, historical_rate=None, ai_evaluations=None):
             expected_bounty = severity_bonus_map.get(sub["severity"], 300)
 
         # Use AI evaluation if available, otherwise fall back to heuristic
+        # Calibrate AI probabilities against researcher's actual acceptance rate
+        # Platform average ~35%; if researcher is below that, discount proportionally
         ai_eval = ai_by_id.get(sub.get("id"))
         if ai_eval:
-            prob = ai_eval["acceptance_probability"]
+            raw_prob = ai_eval["acceptance_probability"]
+            if historical_rate and historical_rate < 0.35:
+                calibration = historical_rate / 0.35
+                prob = round(raw_prob * calibration, 2)
+            else:
+                prob = raw_prob
             prob_source = "ai"
             ai_data = {
                 "likely_outcome": ai_eval.get("likely_outcome"),
@@ -197,8 +204,16 @@ def forecast(report, current_rates, historical_rate=None, ai_evaluations=None):
                 "rate_date": rate_date,
             })
 
-    pessimistic = sum(s["expected_bounty_eur"] for s in scored if s["acceptance_prob"] >= 0.50)
-    optimistic = sum(s["expected_bounty_eur"] for s in scored if s["acceptance_prob"] >= 0.25)
+    # Scenario calculations using probability-weighted values
+    # Pessimistic: only triaged/confirmed submissions (triager already validated)
+    pessimistic = sum(s["expected_value_eur"] for s in scored
+                      if s.get("status", "").lower() == "triaged")
+    # Expected: full probability-weighted sum (already calculated as total_ev)
+    # Optimistic: assume top half of submissions beat their probability by 50%
+    optimistic = sum(
+        min(s["expected_bounty_eur"], s["expected_value_eur"] * 1.5)
+        for s in scored
+    )
 
     return {
         "historical_acceptance_rate": round(historical_rate, 2) if historical_rate else None,
@@ -207,7 +222,7 @@ def forecast(report, current_rates, historical_rate=None, ai_evaluations=None):
         "pending_count": len(scored),
         "scenarios": {
             "pessimistic": {
-                "description": "Only high-probability (>50%) submissions pay",
+                "description": "Only triaged submissions pay (triager-confirmed)",
                 "additional_eur": round(pessimistic, 2),
                 "total_eur": round(confirmed_eur + pessimistic, 2),
             },
@@ -217,12 +232,12 @@ def forecast(report, current_rates, historical_rate=None, ai_evaluations=None):
                 "total_eur": round(confirmed_eur + total_ev, 2),
             },
             "optimistic": {
-                "description": "Everything above 25% probability pays",
+                "description": "Submissions outperform probability estimates by 50%",
                 "additional_eur": round(optimistic, 2),
                 "total_eur": round(confirmed_eur + optimistic, 2),
             },
             "maximum": {
-                "description": "Every pending submission pays (unrealistic)",
+                "description": "Every pending submission pays (unrealistic ceiling)",
                 "additional_eur": round(total_potential, 2),
                 "total_eur": round(confirmed_eur + total_potential, 2),
             },
