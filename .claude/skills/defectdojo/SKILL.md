@@ -113,7 +113,9 @@ sast_sink_object: "Http::get()"
 ---
 ```
 
-**Common body structure** (same for both types):
+**Common body structure — writeup style with inline evidence** (same for both types):
+
+Reports MUST follow **writeup format**: screenshots and evidence embedded inline within Steps to Reproduce, immediately after the step they demonstrate. NEVER put evidence in a table at the end. The report should read like a narrative walkthrough where each step shows the command, then the screenshot proving the result.
 
 ```markdown
 ## Description
@@ -136,15 +138,30 @@ actually achieve? What's the blast radius?
 
 ## Steps to Reproduce
 
-1. First step with exact command/request
-2. Second step...
-3. Observe the result
+### Step 1: Setup and prerequisites
+
+Describe the environment setup and any prerequisites.
+
+![Environment setup](evidence/01_environment.png)
+
+### Step 2: Trigger the vulnerability
 
 ` ` `bash
 curl -X POST https://example.com/api/vulnerable-endpoint \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"url": "http://169.254.169.254/latest/meta-data/"}'
 ` ` `
+
+**Expected**: HTTP 403 Forbidden
+**Actual**: HTTP 200 OK — server fetched the internal metadata
+
+![SSRF response showing internal metadata](evidence/02_ssrf_response.png)
+
+### Step 3: Demonstrate impact
+
+Show the real-world consequence of the vulnerability.
+
+![Impact demonstration](evidence/03_impact.png)
 
 ## Mitigation
 
@@ -159,6 +176,8 @@ if (!in_array($parsed['host'], $allowedHosts)) {
 }
 ` ` `
 ```
+
+**CRITICAL — Inline evidence rule**: Every report.md MUST embed screenshots using `![caption](evidence/filename.png)` directly after the step they prove. NEVER use a standalone "## Evidence" table at the end. The report reads as a self-contained writeup where each claim is immediately backed by visual proof.
 
 ### Frontmatter Fields
 

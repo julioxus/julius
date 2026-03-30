@@ -86,18 +86,30 @@ Use `tools/csv_parser.py` to parse.
 - **Mobile App Download**: See `/mobile-app-acquisition`
 - **Validation + Compliance + Quality**: See `/bounty-validation`
 
-## Report Format
+## Report Format — Inline Writeup Style (MANDATORY)
+
+Reports MUST use **writeup format**: screenshots and evidence embedded inline within Steps to Reproduce, immediately after the step they demonstrate. NEVER put evidence in a table or section at the end. The report reads as a self-contained narrative walkthrough where each claim is backed by visual proof.
 
 Required sections (HackerOne standard):
 1. Summary (2-3 sentences)
 2. Severity (CVSS + business impact)
 3. CWE (e.g., CWE-601, CWE-79 — must appear in report)
-4. Steps to Reproduce (numbered, clear)
+4. Steps to Reproduce — numbered, with **inline evidence** (`![caption](evidence/file.png)` after each step)
 5. Raw HTTP requests/responses (real curl -v output, not reconstructed)
-6. Visual Evidence (Playwright browser screenshots for browser-renderable vulns, real tool output for server-side — see `/bounty-validation` Visual Evidence Standard)
+6. Visual Evidence **embedded inline** (Playwright screenshots for browser vulns, terminal captures for server-side — see `/bounty-validation` Visual Evidence Standard). Each screenshot placed immediately after the step it proves.
 7. Impact (realistic attack scenario)
 8. Remediation (actionable fixes)
 9. AI Disclosure (MANDATORY — see `/bounty-validation` AI Usage Compliance)
+
+**Example inline evidence format:**
+```markdown
+### Step 2: Trigger the vulnerability
+` ` `bash
+curl -X POST https://target.com/api/endpoint ...
+` ` `
+**Expected**: HTTP 403  |  **Actual**: HTTP 200
+![Server returned internal metadata](evidence/02_ssrf_response.png)
+```
 
 Use `tools/report_validator.py` to validate.
 

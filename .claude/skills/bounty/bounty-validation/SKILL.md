@@ -88,6 +88,18 @@ Deploy **`pentester-validator`** agent per finding (all in parallel) to run 5 an
    (b) Downgrade to a building block for future chaining — do NOT submit.
 
    **The test**: "If I were a triager spending 5 minutes on this, would I close it as informative?" If yes, it probably is.
+
+   **Browser security model kill-test (MANDATORY for all web findings)**:
+   Before accepting any browser-based exploit chain, verify that **every hop** survives modern browser defenses. A finding that "works" in curl but breaks in a real browser is NOT exploitable. Check:
+   - **SameSite cookies**: If the attack requires cross-origin cookie sending, check the `SameSite` attribute. No attribute = defaults to `Lax` in all modern browsers (Chrome 80+, Firefox 96+, Edge 80+). `SameSite=Lax` blocks cookies on cross-origin `fetch()`, `XMLHttpRequest`, and `<img>` requests. Only top-level navigations (link clicks, form GET) send Lax cookies. If the exploit needs `credentials: 'include'` to work and cookies are Lax/missing → **EXPLOIT CHAIN BROKEN**.
+   - **CORS + redirects**: If the vulnerable response is a 3xx redirect, JavaScript CANNOT read it. `fetch(url, {redirect:'manual'})` returns an opaque redirect (type: 'opaqueredirect') — headers and body are unreadable. `redirect:'follow'` follows to the new origin where a DIFFERENT CORS policy applies. `redirect:'error'` throws TypeError. A CORS misconfiguration on a 302 response has **zero practical impact** unless the attacker can trigger a non-redirect response.
+   - **Opaque responses**: `no-cors` fetch mode returns opaque responses — status is always 0, body is empty, headers are inaccessible. Don't claim data exfiltration from opaque responses.
+   - **COOP/COEP**: `Cross-Origin-Opener-Policy: same-origin` severs `window.opener`, blocking postMessage-based exfiltration via `window.open()`. Check if COOP is set before claiming postMessage attacks work.
+   - **CSP frame-ancestors / X-Frame-Options**: If the attack requires framing the target, check these headers. Framing is blocked if `frame-ancestors` doesn't include the attacker's origin.
+   - **HttpOnly cookies**: `document.cookie` cannot read HttpOnly cookies. If the claim is "steal session cookies via XSS/CORS" but cookies are HttpOnly, the cookie theft claim is false. (The attacker can still make authenticated requests and read responses if CORS allows, but cannot exfiltrate the cookie value itself.)
+   - **Proxy-layer vs application-layer headers**: If security-relevant headers (CORS, CSP, HSTS) come from a proxy/WAF/CDN layer (check `x-goog-iap-generated-response`, `server: cloudflare`, `via` headers), verify whether those headers also appear on **authenticated application responses**, not just proxy error/redirect pages. A CORS header on a 302 login redirect does NOT mean the 200 authenticated response has the same CORS policy.
+
+   **If ANY browser defense breaks the exploit chain and no bypass is demonstrated, the finding is defense-in-depth (informational) — do NOT submit as Medium/High.**
 3. **Business logic verification (CRITICAL — prevents "by design" rejections)**:
    Before reporting any data exposure, information leak, or access control finding, verify it's NOT intended behavior:
    - **Understand the core service**: What does this company actually do? Search the company's website, About page, and marketing materials. If they are a people-search engine, exposing personal data IS the product. If they are a public registry, open access IS the feature.
@@ -106,6 +118,9 @@ Deploy **`pentester-validator`** agent per finding (all in parallel) to run 5 an
      - Rate limiting in place → is brute-force/DoS impact realistic?
      - Auth required → is Privileges Required correct (PR:L/PR:H, not PR:N)?
      - Network segmentation → is Scope S:U unless cross-boundary was proven?
+     - **SameSite=Lax cookies → does the cross-origin attack actually send cookies?** If not, the exploit chain is broken regardless of CORS/CSRF misconfigurations. This is the #1 missed defense in CORS findings.
+     - **Response is a redirect (3xx) → can JS actually read the response?** Opaque redirects are unreadable. CORS on a 302 has no impact unless the same CORS appears on 200 responses.
+     - **Headers from proxy vs backend → do CORS/security headers persist on authenticated responses?** Check `x-goog-iap-generated-response`, CDN-injected headers, etc.
    - **"Prove it or downgrade it" verification**: For each high-impact claim, check that evidence exists:
      - ATO claim → evidence shows actual login as victim or session hijack
      - RCE claim → evidence shows command output on target

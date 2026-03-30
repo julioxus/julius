@@ -112,12 +112,35 @@ python3 poc.py --target https://[domain]/[path]
 - Must produce **clear output** indicating success/failure
 - Must include **timestamp** in output
 
-## Evidence Requirements
+## Evidence Requirements — Inline Writeup Format (MANDATORY)
 
-| Evidence Type | When Required |
-|---------------|---------------|
-| Screenshot | Always (showing vulnerability) |
-| HTTP request/response | Always (raw traffic) |
-| Video | Complex multi-step vulnerabilities |
-| PoC script | RCE, SQLi, SSRF, auth bypass |
-| Impact demonstration | Account takeover, data access |
+Reports MUST embed evidence **inline within Steps to Reproduce**, immediately after the step they demonstrate. The report reads as a self-contained writeup where each claim is backed by visual proof at the point it's made.
+
+**Format**: Use `![caption](evidence/filename.png)` after each step:
+
+```markdown
+### Step 1: Send crafted request
+
+` ` `bash
+curl -X POST https://target.com/api/endpoint ...
+` ` `
+
+**Expected**: HTTP 403
+**Actual**: HTTP 200 — vulnerability triggered
+
+![Server returned internal metadata](evidence/01_ssrf_response.png)
+
+### Step 2: Demonstrate impact
+...
+![Account takeover confirmed](evidence/02_account_takeover.png)
+```
+
+**NEVER** put evidence in a table at the end of the report. Every screenshot must appear next to the step it proves.
+
+**Required evidence types** (embed inline where relevant):
+
+- **Screenshot** — Always. Captured with Playwright for browser vulns, terminal output for server-side.
+- **HTTP request/response** — Always. Raw `curl -v` output or Burp export.
+- **Video** — Complex multi-step vulnerabilities only.
+- **PoC script** — RCE, SQLi, SSRF, auth bypass.
+- **Impact demonstration** — Account takeover, data access.
