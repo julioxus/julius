@@ -364,7 +364,7 @@ def score_submission(sub, historical_rate=None):
     }
 
 
-def forecast(report, current_rates, historical_rate=None, ai_evaluations=None):
+def forecast(report, current_rates, historical_rate=None, ai_evaluations=None, pending_reports=None):
     pending = report.get("pending_submissions", [])
     paid = report.get("paid_submissions", [])
 
@@ -518,6 +518,7 @@ def forecast(report, current_rates, historical_rate=None, ai_evaluations=None):
         "payout_conversions": payout_conversions,
         "monthly_breakdown": monthly,
         "triage_stats": triage_stats,
+        "pending_reports": pending_reports or {"pending": [], "programs": {}},
         "pending_count": len(scored),
         "scenarios": {
             "pessimistic": {
@@ -598,6 +599,7 @@ def main():
     parser.add_argument("report", help="Path to report_latest.json from inbox_exporter")
     parser.add_argument("--eur-rates", help="JSON with currency->EUR rates", default=None)
     parser.add_argument("--ai-evaluations", help="Path to ai_evaluation.json from ai_triager.py")
+    parser.add_argument("--pending-reports", help="Path to pending_reports.json from pending_reports_scanner.py")
     parser.add_argument("--output", help="Save forecast JSON to file")
     args = parser.parse_args()
 
@@ -620,7 +622,12 @@ def main():
         ai_evals = json.loads(Path(args.ai_evaluations).read_text())
         print(f"[+] Loaded {len([e for e in ai_evals if e.get('ai_evaluation')])} AI evaluations")
 
-    fc = forecast(report, current_rates, ai_evaluations=ai_evals)
+    pending_reps = None
+    if args.pending_reports:
+        pending_reps = json.loads(Path(args.pending_reports).read_text())
+        print(f"[+] Loaded {pending_reps.get('pending_count', 0)} pending local reports")
+
+    fc = forecast(report, current_rates, ai_evaluations=ai_evals, pending_reports=pending_reps)
     print_forecast(fc)
 
     if args.output:
