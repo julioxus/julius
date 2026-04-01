@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-def generate_html(fc, report, researcher_name=None, recommendations=None):
+def generate_html(fc, report, researcher_name=None, recommendations=None, pending_reports=None):
     paid = report.get("paid_submissions", [])
     pending = report.get("pending_submissions", [])
     rejected = report.get("rejected_submissions", [])
@@ -538,6 +538,81 @@ def generate_html(fc, report, researcher_name=None, recommendations=None):
   </div>
 </div>"""
 
+    # Pending Reports section (local INTI reports not yet submitted)
+    pr = pending_reports or fc.get("pending_reports")
+    if pr and pr.get("pending"):
+        pending_list = pr["pending"]
+        programs = pr.get("programs", {})
+
+        # Group by program status
+        open_reports = [p for p in pending_list if p.get("program_status") == "open"]
+        suspended_reports = [p for p in pending_list if p.get("program_status") == "suspended"]
+        other_reports = [p for p in pending_list if p.get("program_status") not in ("open", "suspended")]
+
+        html += f"""
+<h2>Pending Local Reports (Not Yet Submitted)</h2>
+<p style="color:var(--muted);font-size:0.85rem;margin-bottom:0.8rem">
+  {len(pending_list)} INTI reports found locally that have not been submitted to Intigriti.
+  Scan cross-references file titles with existing submissions on the platform.
+</p>"""
+
+        if open_reports:
+            html += f"""
+<h3 style="margin:1.2rem 0 0.5rem"><span class="badge badge-green">OPEN</span> Ready to Submit ({len(open_reports)})</h3>
+<table>
+  <tr><th>File</th><th>Severity</th><th>Program</th><th>Title</th></tr>"""
+            for p in open_reports:
+                sev = p.get("severity", "?")
+                sev_class = {"High": "badge-red", "Critical": "badge-red", "Medium": "badge-yellow", "Low": "badge-blue"}.get(sev, "badge-gray")
+                title_display = p.get("title", "")[:80]
+                html += f"""
+  <tr>
+    <td style="font-family:monospace;font-size:0.8rem">{p.get('filename', '')}</td>
+    <td><span class="badge {sev_class}">{sev}</span></td>
+    <td>{p.get('program_name', p.get('program_dir', ''))}</td>
+    <td style="font-size:0.85rem">{title_display}</td>
+  </tr>"""
+            html += """
+</table>"""
+
+        if suspended_reports:
+            html += f"""
+<h3 style="margin:1.2rem 0 0.5rem"><span class="badge badge-yellow">SUSPENDED</span> Waiting for Program to Reopen ({len(suspended_reports)})</h3>
+<table>
+  <tr><th>File</th><th>Severity</th><th>Program</th><th>Title</th></tr>"""
+            for p in suspended_reports:
+                sev = p.get("severity", "?")
+                sev_class = {"High": "badge-red", "Critical": "badge-red", "Medium": "badge-yellow", "Low": "badge-blue"}.get(sev, "badge-gray")
+                title_display = p.get("title", "")[:80]
+                html += f"""
+  <tr>
+    <td style="font-family:monospace;font-size:0.8rem">{p.get('filename', '')}</td>
+    <td><span class="badge {sev_class}">{sev}</span></td>
+    <td>{p.get('program_name', p.get('program_dir', ''))}</td>
+    <td style="font-size:0.85rem">{title_display}</td>
+  </tr>"""
+            html += """
+</table>"""
+
+        if other_reports:
+            html += f"""
+<h3 style="margin:1.2rem 0 0.5rem"><span class="badge badge-gray">UNKNOWN</span> Status Unresolved ({len(other_reports)})</h3>
+<table>
+  <tr><th>File</th><th>Severity</th><th>Program</th><th>Title</th></tr>"""
+            for p in other_reports:
+                sev = p.get("severity", "?")
+                sev_class = {"High": "badge-red", "Critical": "badge-red", "Medium": "badge-yellow", "Low": "badge-blue"}.get(sev, "badge-gray")
+                title_display = p.get("title", "")[:80]
+                html += f"""
+  <tr>
+    <td style="font-family:monospace;font-size:0.8rem">{p.get('filename', '')}</td>
+    <td><span class="badge {sev_class}">{sev}</span></td>
+    <td>{p.get('program_name', p.get('program_dir', ''))}</td>
+    <td style="font-size:0.85rem">{title_display}</td>
+  </tr>"""
+            html += """
+</table>"""
+
     html += """
 
 <script>
@@ -569,6 +644,7 @@ def main():
     parser.add_argument("--report", help="Path to report_latest.json (for submission lists)")
     parser.add_argument("-o", "--output", default="outputs/intigriti-inbox/bounty_report.html")
     parser.add_argument("--recommendations", help="Path to program_recommendations.json")
+    parser.add_argument("--pending-reports", help="Path to pending_reports.json")
     parser.add_argument("--researcher", help="Researcher username for display", default=None)
     args = parser.parse_args()
 
@@ -596,7 +672,16 @@ def main():
 
     recs = json.loads(Path(recs_path).read_text()) if recs_path else None
 
-    html = generate_html(fc, report, researcher_name=args.researcher, recommendations=recs)
+    pr_path = getattr(args, 'pending_reports', None)
+    if not pr_path:
+        parent = Path(args.forecast).parent
+        candidate = parent / "pending_reports.json"
+        if candidate.exists():
+            pr_path = str(candidate)
+
+    pr = json.loads(Path(pr_path).read_text()) if pr_path else None
+
+    html = generate_html(fc, report, researcher_name=args.researcher, recommendations=recs, pending_reports=pr)
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html)

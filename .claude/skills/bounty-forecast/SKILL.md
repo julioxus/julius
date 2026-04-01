@@ -110,32 +110,45 @@ Recommendation criteria:
 - **Competition level** — popular programs = more duplicates
 - **Memory insights** — past decisions, engagement notes, feedback
 
-### Step 5: Generate Forecast with AI data
+### Step 5: Scan Pending Local Reports
+```bash
+python3 .claude/skills/intigriti/tools/pending_reports_scanner.py \
+  --base-dir . \
+  --output outputs/intigriti-inbox/pending_reports.json
+```
+
+This scans all `outputs/intigriti-*/reports/submissions/INTI_*_*.md` files, cross-references
+with existing Intigriti submissions via the API, and checks program status (open/suspended/closed).
+Output includes pending reports grouped by program status.
+
+### Step 6: Generate Forecast with AI data + Pending Reports
 ```bash
 python3 .claude/skills/intigriti/tools/bounty_forecast.py \
   outputs/intigriti-inbox/report_latest.json \
   --ai-evaluations outputs/intigriti-inbox/ai_evaluation.json \
+  --pending-reports outputs/intigriti-inbox/pending_reports.json \
   --output outputs/intigriti-inbox/forecast_latest.json
 ```
 
-### Step 6: Generate HTML Report
+### Step 7: Generate HTML Report
 ```bash
 python3 .claude/skills/intigriti/tools/bounty_report_html.py \
   outputs/intigriti-inbox/forecast_latest.json \
   --report outputs/intigriti-inbox/report_latest.json \
+  --pending-reports outputs/intigriti-inbox/pending_reports.json \
   --researcher julioxus \
   -o outputs/intigriti-inbox/bounty_report.html
 open outputs/intigriti-inbox/bounty_report.html
 ```
 
-### Step 7: Present Findings
+### Step 8: Present Findings
 Summarize to the user:
 1. **Monthly breakdown** — past months (actual earnings), current month (confirmed + pending EV), next 3 months (projected)
 2. **Earnings** — confirmed total (EUR, historical FX) and pending estimates
 3. **AI triager highlights** — which findings are strong vs weak, with reasoning
 4. **Top programs to focus on** — ranked recommendations with evidence
 5. **Programs to avoid/deprioritize** — based on rejection patterns
-6. **Unexploited opportunities** — programs with local work never submitted
+6. **Pending local reports** — INTI files not yet submitted, grouped by program status (open/suspended)
 7. **Key improvements** — actionable changes to increase acceptance rate
 
 ## Reference
