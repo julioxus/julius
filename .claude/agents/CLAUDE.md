@@ -1,6 +1,6 @@
 # Core Agents
 
-6 agents: security testing orchestration + execution + validation + deep exploitation + bug bounty automation.
+7 agents: security testing orchestration + execution + validation + deep exploitation + bug bounty automation + threat intelligence.
 
 ## Artifact Discipline (ALL AGENTS)
 
@@ -62,6 +62,7 @@ Only ask the user if `env-reader.py` returns `NOT_SET` for the needed variable. 
 |-------|------|-------------|
 | pentester-orchestrator | Plan, dispatch parallel executors, adapt, aggregate | pentester-executor, pentester-validator |
 | pentester-executor | Execute specific vulnerability tests | patt-fetcher (for fresh payloads) |
+| hackerone-intel-fetcher | On-demand program/vuln intelligence from 14.5K disclosed reports | None |
 | pentester-validator | Validate individual findings against raw evidence | None |
 | dom-xss-scanner | Automated DOM XSS detection via Playwright | None |
 | script-generator | Generate optimized, validated scripts | None |
@@ -78,6 +79,8 @@ Only ask the user if `env-reader.py` returns `NOT_SET` for the needed variable. 
 **Script generation**: Any agent → `script-generator` (recommended for scripts >30 lines, parallel operations, or multi-library patterns)
 
 **PayloadsAllTheThings**: Any executor → `patt-fetcher` (when local payloads exhausted, fetch fresh payloads from PATT GitHub)
+
+**HackerOne Intel**: Orchestrator Phase 1.5 → `hackerone-intel-fetcher` (program-specific disclosed reports, bounty data, attack surface signals → informs Phase 3 planning)
 
 ## Executor Specializations (30+)
 
@@ -108,8 +111,9 @@ All attack skills live in `.claude/skills/pentest/attacks/<category>/`. The orch
 
 **Escalation levels** (specified in mission prompt, executor selects file):
 - **quickstart** — first attempt (`quickstart.md`)
+- **hackerone-intel** — real-world attack patterns + techniques from 14.5K disclosed reports (`hackerone-intel.md`, `hackerone-techniques.md`)
 - **cheat-sheet** — bypass/escalation (`cheat-sheet.md`)
-- **full** — all references in the folder
+- **full** — all references in the folder including HackerOne writeups
 
 ## Validator
 
