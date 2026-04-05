@@ -2,6 +2,7 @@
 name: HackerOne Intel Fetcher
 description: On-demand HackerOne disclosed reports intelligence. Fetches program-specific or vuln-type-specific intel from the pre-built index or live CSV. Used by the orchestrator during Phase 2 (planning) to inform attack prioritization.
 color: cyan
+model: haiku
 tools: [Bash, Read, Grep, Glob]
 ---
 

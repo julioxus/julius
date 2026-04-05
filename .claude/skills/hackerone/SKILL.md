@@ -14,11 +14,12 @@ Automates HackerOne workflows: scope parsing → mobile app acquisition → reco
 2. Parse scope and program guidelines
 3. For mobile assets: use /mobile-app-acquisition to detect emulators and download apps
 4. Run /bounty-recon for prioritization + recon pipeline (recon only, no agent deployment)
-5. Invoke /pentest in sub-orchestrator mode (testing engine)
-6. MANDATORY: Invoke /bounty-validation skill for PoC validation + pre-submission gate + AI compliance
-   → This is NOT optional. Do NOT declare reports ready without running this skill.
-   → /bounty-validation enforces: anti-hallucination checks, AI disclosure, evidence quality, OOS checks
-7. Generate HackerOne-formatted reports (only after /bounty-validation passes)
+5. **Autopilot decision**: Ask user — "Autopilot mode? (paranoid/normal/yolo/no)". If yes → invoke `/autopilot`. If no → invoke `/pentest` directly.
+6. Invoke /pentest in sub-orchestrator mode OR /autopilot (testing engine)
+7. MANDATORY: Invoke /bounty-validation skill for PoC validation + pre-submission gate + AI compliance
+   → /bounty-validation enforces: anti-hallucination checks, AI disclosure, evidence quality, OOS checks, never-submit list
+8. Record validated findings: `python3 tools/hunt_memory.py record ...` for each finding
+9. Generate HackerOne-formatted reports (only after /bounty-validation passes)
 ```
 
 ## Workflows
@@ -39,9 +40,11 @@ Automates HackerOne workflows: scope parsing → mobile app acquisition → reco
 - [ ] Parse CSV scope file
 - [ ] Extract eligible_for_submission=true assets
 - [ ] Collect program guidelines
+- [ ] Generate scope.json: `python3 tools/scope_checker.py generate --domains '<in-scope>' --oos '<oos>' --output outputs/{program}/scope.json`
 - [ ] Run /bounty-recon (recon only → testing_recommendations.md)
-- [ ] Invoke /pentest with scope contract (Phase 3-5)
+- [ ] Invoke /pentest with scope contract (Phase 3-5, includes scope_file)
 - [ ] Run /bounty-validation on findings
+- [ ] Record validated findings: `python3 tools/hunt_memory.py record ...` for each finding
 - [ ] Generate HackerOne submission reports
 ```
 
@@ -64,6 +67,7 @@ context:
   test_types: ["dast"] # bounty programs are dynamic testing
   recon_path: "outputs/{program}/processed/reconnaissance/"
   testing_recommendations: "outputs/{program}/processed/reconnaissance/testing_recommendations.md"
+  scope_file: "outputs/{program}/scope.json" # generated from CSV for deterministic scope checking
 ```
 
 `/pentest` runs Phase 3 (user approves attack plan), Phase 4 (deploy executors), Phase 5 (aggregate findings). Findings land in `outputs/{program}/processed/findings/`.

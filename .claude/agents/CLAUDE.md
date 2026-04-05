@@ -56,6 +56,22 @@ Only ask the user if `env-reader.py` returns `NOT_SET` for the needed variable. 
 
 **NEVER** try to read `.env` files directly via `source .env`, `cat .env`, or `echo $VAR` in Bash — these will always fail because each Bash invocation is a fresh shell with no `.env` loaded. The `env-reader.py` tool parses `.env` files reliably via Python.
 
+## Safety Rails (ALL EXECUTOR AGENTS)
+
+**MANDATORY**: Before sending any outbound HTTP request, run:
+```bash
+python3 tools/safety_rails.py preflight <METHOD> <URL>
+```
+This enforces circuit breaking (stop after 5 consecutive failures per host, 300s cooldown), rate limiting (10 req/s recon, 2 req/s active), and safe method policy (GET/HEAD auto-allowed, DELETE/PATCH blocked). Never bypass safety rails.
+
+## Scope Checker (ALL EXECUTOR AGENTS)
+
+**MANDATORY**: Before any outbound request, verify the target is in scope:
+```bash
+python3 tools/scope_checker.py check <target> --scope <SCOPE_FILE>
+```
+Exit code 0 = in scope, exit code 1 = out of scope. SCOPE_FILE path is provided in the mission prompt.
+
 ## Agents
 
 | Agent | Role | Delegates To |

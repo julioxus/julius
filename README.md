@@ -22,12 +22,13 @@ Built on top of [Transilience AI Community Tools](https://github.com/transilienc
 
 | | |
 |-|-|
-| **48 skills** | Pentesting, recon, bug bounty, vendor assessment, cloud, mobile, SAST, reporting |
+| **50+ skills** | Pentesting, recon, bug bounty, vendor assessment, cloud, mobile, SAST, Web3 audit, reporting |
 | **8 agents** | Orchestrator, executor, validator, DOM XSS scanner, script generator, payload fetcher, HackTheBox, skill creator |
 | **186 attack docs** | PortSwigger Academy solutions, cheat sheets, methodology guides |
-| **2 bug bounty platforms** | HackerOne, Intigriti |
+| **2 bug bounty platforms** | HackerOne, Intigriti (with autopilot mode) |
 | **Vulnerability management** | DefectDojo orchestrator (scope analysis, SAST/DAST via /pentest, API import) |
 | **Vendor assessment** | Non-intrusive third-party security evaluation (DNS, supply chain, SAST, compliance) |
+| **Safety tools** | Deterministic scope checker, circuit breaker + rate limiter, cross-target hunt memory |
 | **Tool integrations** | Burp Suite MCP, HexStrike AI (150+ tools), Playwright, Kali toolset, RecoX |
 
 ---
@@ -48,10 +49,12 @@ The primary use case. Two entry points depending on platform:
    Parse program scope → extract assets, tiers, bounty table, OOS list
    Intigriti: Researcher API → domains, tiers, testing requirements (User-Agent, headers)
    HackerOne: CSV → eligible assets, max severity, instructions
+   Generate scope.json → deterministic scope enforcement (tools/scope_checker.py)
    Mobile assets → /mobile-app-acquisition
 
 2. RECONNAISSANCE (/bounty-recon — recon only, no agent deployment)
    ├── Bounty-driven prioritization: map vuln types → bounty amounts, rank by payout
+   ├── Hunt memory query: cross-target intelligence (tools/hunt_memory.py suggest)
    ├── Endpoint recon: tools/recox (Wayback, CommonCrawl, OTX, URLScan)
    ├── Post-enumeration: httpx → naabu → ffuf → nuclei
    ├── Extended recon (6 skills in parallel):
@@ -67,6 +70,14 @@ The primary use case. Two entry points depending on platform:
        ├── Chain opportunities, WAF/CDN info for payload selection
        └── Mobile assets for /mobile-security
 
+2b. AUTOPILOT DECISION (optional)
+   User chooses: /autopilot (paranoid/normal/yolo) or /pentest directly
+   Autopilot: iterates surface-by-surface with checkpoints + safety rails
+   ├── Circuit breaker: stops after 5 failures per host (300s cooldown)
+   ├── Rate limiter: 10 req/s recon, 2 req/s active testing
+   ├── Safe method policy: PUT/DELETE/PATCH always require human approval
+   └── Findings from surface N inform surface N+1 via hunt memory
+
 3. TESTING (/pentest in sub-orchestrator mode — Phase 3-5)
    ├── Phase 3: Attack plan from recon + recommendations → user approves
    ├── Phase 4: pentester-orchestrator dispatches parallel executor batches:
@@ -81,6 +92,7 @@ The primary use case. Two entry points depending on platform:
    └── Phase 5: Aggregate findings, deduplicate, identify chains
 
 4. IMPACT ESCALATION (/pentest Phase 5.5 — 3 rounds, early stop if no new findings)
+   ├── Chain Lookup Table (AGENTS.md): 30+ "Bug A → try Bug B" mappings, each attempted
    ├── Round 1: Chain exploitation + privilege escalation on initial findings
    │   ├── SSRF→metadata→creds, XSS+CSRF→ATO, IDOR+email change→takeover
    │   └── user→admin, authenticated→unauthenticated, read→write/delete
@@ -102,6 +114,8 @@ The primary use case. Two entry points depending on platform:
    └── Only validated findings proceed to submission or reporting
 
 5. VALIDATION (/bounty-validation)
+   ├── Never-Submit List: 17 conditional items (open redirect, CORS, self-XSS, etc.)
+   │   └── Each blocked unless specific chain condition is demonstrated with evidence
    ├── Pre-submission gate (on top of Phase 5.6 validation):
    │   ├── OOS check (general + mobile-specific exclusions)
    │   ├── Business logic verification: is this "by design"?
@@ -110,7 +124,8 @@ The primary use case. Two entry points depending on platform:
    │   └── If claim lacks evidence → REJECT back to /pentest Phase 5.5
    └── AI disclosure section (mandatory)
 
-6. SUBMISSION
+6. RECORDING & SUBMISSION
+   Record validated findings to hunt memory (cross-target intelligence for future engagements)
    Platform-ready reports (INTI_SEVERITY_NNN.md or H1_SEVERITY_NNN.md)
    with CVSS, CWE, steps to reproduce, full evidence chain, remediation
 ```
@@ -251,6 +266,7 @@ Each attack type has PortSwigger Academy solutions, cheat sheets, and methodolog
 | CVE Testing | `/cve-testing` | Known CVE testing with public exploits |
 | CVE PoC Generator | `/cve-poc-generator` | Research CVE → Python PoC + report |
 | OWASP Quick Test | `/common-appsec-patterns` | OWASP Top 10 quick-hit testing |
+| Web3 Audit | `/web3-audit` | Smart contract security: 10 vuln classes, Foundry PoCs, Slither SAST |
 
 ### Infrastructure
 
@@ -270,6 +286,17 @@ Each attack type has PortSwigger Academy solutions, cheat sheets, and methodolog
 
 ---
 
+## Safety & Intelligence Tools
+
+| Tool | Command | Purpose |
+|------|---------|---------|
+| **Scope Checker** | `python3 tools/scope_checker.py check <target> --scope scope.json` | Deterministic in-scope/OOS validation. Anchored suffix matching (prevents `evil-target.com` matching `*.target.com`). CIDR support. OOS deny-first. |
+| **Safety Rails** | `python3 tools/safety_rails.py preflight <METHOD> <URL>` | Circuit breaker (5 failures → 300s cooldown), rate limiter (10 rps recon / 2 rps active), safe method policy (PUT/DELETE blocked). |
+| **Hunt Memory** | `python3 tools/hunt_memory.py suggest --tech "rails,pg"` | Cross-target pattern DB. Records what worked where, sorted by payout. "IDOR succeeded on Rails app A → suggest IDOR first on Rails app B." Also feeds bounty-forecast probability calibration. |
+| **Autopilot** | `/autopilot --mode normal` | Autonomous surface-by-surface hunt loop. 3 modes: paranoid (pause per finding), normal (pause per surface), yolo (minimal stops). Integrates all safety tools. |
+
+---
+
 ## Tool Integrations
 
 | Tool | Integration | Used for |
@@ -284,7 +311,7 @@ Each attack type has PortSwigger Academy solutions, cheat sheets, and methodolog
 
 ## Agents
 
-8 specialized agents in `.claude/agents/`, coordinated by shared rules in `agents/CLAUDE.md` (artifact discipline, credential loading, output structure).
+8 specialized agents in `.claude/agents/`, coordinated by shared rules in `agents/CLAUDE.md` (artifact discipline, credential loading, safety rails, scope checking). Each agent has explicit model routing: haiku for data retrieval, sonnet for testing/coordination, opus for the validator gate.
 
 ### Core testing pipeline
 
@@ -360,11 +387,12 @@ julius/
 ├── .claude/
 │   ├── skills/
 │   │   ├── pentest/                 # Canonical testing engine (11 attack categories, 186 docs)
+│   │   │   └── autopilot/           # Autonomous hunt loop (paranoid/normal/yolo)
 │   │   ├── hackerone/               # HackerOne orchestrator (scope → recon → /pentest → submit)
 │   │   ├── intigriti/               # Intigriti orchestrator (API scope → recon → /pentest → submit)
 │   │   ├── defectdojo/              # DefectDojo orchestrator (scope analysis → /pentest → upload)
 │   │   ├── vendor-security-assessment/ # Third-party vendor/SDK security evaluation
-│   │   ├── offensive/               # SAST, CVE, auth, AI threats (6 skills)
+│   │   ├── offensive/               # SAST, CVE, auth, AI threats, Web3 audit (7 skills)
 │   │   ├── recon/                   # Reconnaissance (10 skills)
 │   │   ├── detection/               # Technology detection (15 skills)
 │   │   ├── bounty/                  # Shared bounty pipelines: recon, validation, mobile (3 skills)
@@ -373,13 +401,16 @@ julius/
 │   │   ├── reporting/               # Formatters and exporters (3 skills)
 │   │   └── skiller/                 # Skill creation
 │   ├── agents/                      # 8 specialized agents
-│   │   ├── CLAUDE.md                # Shared rules (artifact discipline, credentials, interaction model)
+│   │   ├── CLAUDE.md                # Shared rules (artifact discipline, credentials, safety rails, scope)
 │   │   ├── pentester-orchestrator   # Pure manager: parallel batches, adaptation loops
 │   │   ├── pentester-executor       # Thin runner: missions, escalation, writeup evidence
 │   │   ├── pentester-validator      # 5-check anti-hallucination + inline evidence verification
 │   │   └── reference/               # Output structure + test plan templates
 │   └── tools/                       # env-reader.py (credential loading utility)
-├── tools/                           # Playwright, Kali, RecoX installers
+├── tools/                           # Safety tools + external installers
+│   ├── scope_checker.py             # Deterministic scope validation
+│   ├── safety_rails.py              # Circuit breaker + rate limiter + safe method policy
+│   ├── hunt_memory.py               # Cross-target pattern DB (JSONL)
 ├── outputs/                         # Engagement outputs (gitignored)
 └── CONTRIBUTING.md
 ```

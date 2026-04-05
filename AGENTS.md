@@ -44,6 +44,46 @@
 
 ---
 
+## Vulnerability Chain Lookup Table
+
+**When Bug A is confirmed, attempt Bug B.** Used by Phase 5.5 (Impact Escalation) — each matching chain MUST be attempted as a separate executor mission.
+
+| Confirmed (A) | Chain To (B) | Chain Goal | Priority |
+|---|---|---|---|
+| XSS (Stored) | CSRF token theft | Stored XSS → CSRF → Mass ATO | CRITICAL |
+| XSS (Reflected) | OAuth token theft | Reflected XSS in OAuth redirect → ATO | CRITICAL |
+| XSS (Any) | Cookie theft (document.cookie) | Session hijack (check HttpOnly first) | HIGH |
+| SSRF | Cloud metadata (169.254.169.254) | SSRF → IAM credentials → AWS takeover | CRITICAL |
+| SSRF | Internal service discovery | SSRF → internal admin panel → RCE | HIGH |
+| SSRF (Blind) | DNS rebinding / redirect chain | Upgrade blind SSRF to full-read | HIGH |
+| IDOR (Read) | PII data exfiltration | IDOR → PII leak → privacy violation | HIGH |
+| IDOR (Read) | Write/Delete on same endpoint | Read IDOR → test PUT/DELETE/PATCH | HIGH |
+| IDOR (Any) | Privilege escalation (admin IDs) | User IDOR → admin data access | CRITICAL |
+| SQLi | Database dump → credentials | SQLi → credential theft → ATO | CRITICAL |
+| SQLi (Stacked) | OS command execution | SQLi → xp_cmdshell / LOAD_FILE → RCE | CRITICAL |
+| SQLi | File read (LOAD_FILE, UTL_FILE) | SQLi → source code / config leak | HIGH |
+| Open Redirect | OAuth callback manipulation | Open redirect + OAuth = token theft → ATO | CRITICAL |
+| CSRF | State-changing auth actions | CSRF on email/password change → ATO | CRITICAL |
+| Path Traversal | Config file read (.env, web.config) | Traverse → secrets → lateral access | HIGH |
+| Path Traversal | Source code read | Traverse → app source → more vulns | HIGH |
+| File Upload | Web shell (.php/.jsp) | Upload → RCE | CRITICAL |
+| File Upload | Stored XSS via SVG/HTML | Upload SVG with JS → stored XSS | HIGH |
+| Auth Bypass | Admin panel access | Bypass → admin → full control | CRITICAL |
+| JWT alg:none | Privilege escalation | Forge admin JWT → vertical escalation | CRITICAL |
+| Race Condition | Financial impact | Race → double-spend, limit bypass | HIGH |
+| Info Disclosure (version) | CVE exploitation | Version leak → known CVE → RCE | HIGH |
+| Info Disclosure (source) | Hardcoded secrets | Source leak → API keys → lateral access | HIGH |
+| CORS Misconfiguration | Authenticated data theft | CORS + credentialed fetch → data exfil | HIGH |
+| Prototype Pollution | XSS or RCE via gadget | PP → gadget chain → code execution | HIGH |
+| HTTP Smuggling | Cache poisoning | Smuggle → poison cache → mass XSS | CRITICAL |
+| Cache Poisoning | Stored XSS delivery | Poison cache with XSS → mass impact | CRITICAL |
+| Deserialization | RCE via gadget chain | Deser → gadget chain → command exec | CRITICAL |
+| Reentrancy (Web3) | Fund drain | Reentrant call → drain contract balance | CRITICAL |
+| Oracle Manipulation (Web3) | Flash loan attack | Manipulate price oracle → profit extraction | CRITICAL |
+| Access Control (Web3) | Privilege escalation | Missing modifier → unauthorized state change | CRITICAL |
+
+---
+
 ## Testing Methodologies
 
 **PTES** (7 phases): Pre-engagement → Intelligence → Threat modeling → Vulnerability analysis → Exploitation → Post-exploitation → Reporting
@@ -126,6 +166,8 @@ These are almost universally excluded from bug bounty programs. Do not waste tim
 - **Physical security** issues
 - **Vulnerabilities in out-of-scope assets** or third-party services
 
+**See also**: `/bounty-validation` Never-Submit List for the full conditional validity table — each item above becomes valid ONLY when chained (see table for exact conditions).
+
 ### AI Usage Compliance (MANDATORY)
 
 All bug bounty submissions that involve AI assistance MUST comply with platform code of conduct:
@@ -180,6 +222,8 @@ All findings were independently discovered, verified, and validated by the resea
 | `/hexstrike` | HexStrike AI MCP - 150+ tools, 12 AI agents, automated workflows |
 | `/defectdojo` | DefectDojo vulnerability management (import findings, manage engagements) |
 | `/web-application-mapping` | Web app reconnaissance |
+| `/autopilot` | Autonomous hunt loop with checkpoint modes (paranoid/normal/yolo) |
+| `/web3-audit` | Smart contract security audit (Solidity, Vyper, 10 vulnerability classes) |
 
 ---
 

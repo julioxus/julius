@@ -12,7 +12,7 @@ This repo provides Claude Code skills and agents for security testing, bug bount
 - Contains compressed security testing knowledge (80% reduction: ~40KB → ~8KB)
 - Pipe-delimited indexing: `Vulnerability|Payloads|Details|Reference`
 - "Prefer retrieval-led reasoning" directive for security tasks
-- Includes: Vulnerability payloads, methodologies (PTES, OWASP, MITRE), CVSS scoring, PoC standards
+- Includes: Vulnerability payloads, methodologies (PTES, OWASP, MITRE), CVSS scoring, PoC standards, vulnerability chain lookup table (30+ chains for Phase 5.5 escalation)
 
 **Skills** (`.claude/skills/`):
 - **User-triggered workflows** - Invoked explicitly with `/skill-name`
@@ -35,12 +35,13 @@ This repo provides Claude Code skills and agents for security testing, bug bount
 - `.claude/skills/` - **Workflow orchestration skills** (user-triggered):
   - **Orchestrators** (top-level for slash command discovery):
     - `pentest/` - Canonical testing engine (11 attack categories, 186 docs)
+    - `pentest/autopilot/` - Autonomous hunt loop (paranoid/normal/yolo modes)
     - `hackerone/` - HackerOne bug bounty orchestrator
     - `intigriti/` - Intigriti bug bounty orchestrator
     - `defectdojo/` - DefectDojo vulnerability management orchestrator
     - `vendor-security-assessment/` - Third-party vendor/SDK security evaluation
   - **Categories** (supporting skills):
-    - `offensive/` - Targeted testing (SAST, CVE, auth, AI threats)
+    - `offensive/` - Targeted testing (SAST, CVE, auth, AI threats, Web3 audit)
     - `recon/` - Reconnaissance (10 skills)
     - `detection/` - Technology detection (15 skills)
     - `bounty/` - Shared bounty pipelines (recon, validation, mobile)
@@ -49,12 +50,16 @@ This repo provides Claude Code skills and agents for security testing, bug bount
     - `reporting/` - Evidence formatting and report export
     - `skiller/` - Skill creation and management
 - `.claude/agents/` - Reusable specialized agents (orchestrator, executor, validator, DOM XSS, script-gen, etc.)
-    - `CLAUDE.md` - Shared agent rules (artifact discipline, credential loading, interaction model)
+    - `CLAUDE.md` - Shared agent rules (artifact discipline, credential loading, safety rails, scope checking)
     - `pentester-orchestrator.md` - Pure manager: plans, dispatches parallel executor batches, adapts
     - `pentester-executor.md` - Thin runner: receives missions, loads skills, escalates, returns results
     - `pentester-validator.md` - Finding validator: 5 mandatory checks including real evidence verification
     - `reference/` - Agent output structure and test plan templates
-- `tools/` - External tool installers (Playwright, Kali, RecoX)
+- `tools/` - Shared Python tools and external tool installers:
+    - `scope_checker.py` - Deterministic scope validation (anchored suffix matching, CIDR, OOS deny-first)
+    - `safety_rails.py` - Circuit breaker + rate limiter + safe method policy
+    - `hunt_memory.py` - JSONL cross-target pattern DB (what worked where, sorted by payout)
+    - Installers: Playwright, Kali, RecoX
 - `templates/` - Skill templates
 
 ## Git Conventions

@@ -142,6 +142,34 @@ Deploy **`pentester-validator`** agent per finding (all in parallel) to run 5 an
    - **Visual evidence enforced** (see Visual Evidence Standard): browser-renderable vulns MUST have Playwright screenshots; server-side vulns MUST have real curl/tool output. Simulated terminal output = REJECTED.
 7. **Present findings to user for review**: Show a summary of each finding with severity, evidence quality, OOS risk assessment, and business logic verification result. Let the user decide which to submit.
 
+## Never-Submit List (Conditional Validity Table)
+
+**HARD BLOCK**: Do NOT submit any finding in this table UNLESS the specified chain/condition is DEMONSTRATED with evidence. This is a deterministic check — no judgment calls.
+
+| Finding Type | NEVER Submit If... | VALID Only When... |
+|---|---|---|
+| Open Redirect | Standalone, no chain | Chained with OAuth/SSO token theft → ATO demonstrated |
+| CORS Misconfiguration | No data exfil PoC | Credentialed cross-origin fetch extracts real user data |
+| CORS on 3xx Response | Redirect-only response | Same CORS on 200 authenticated response + data exfil |
+| Missing Security Headers | CSP/HSTS/X-Frame absent | Absence enables specific exploit (XSS fires because no CSP) |
+| Version Disclosure | Server banner, X-Powered-By | Version maps to exploitable CVE with working PoC |
+| Stack Trace / Debug Info | Error pages with paths | Leaked info enables follow-up exploitation |
+| Self-XSS | Only fires in own session | Chained with CSRF/login CSRF to fire in victim session |
+| CSRF on Logout | Log out another user | Chained with login CSRF → session fixation → ATO |
+| CSRF on Non-Sensitive Form | Language/theme change | Form changes security-critical state (email, password, 2FA) |
+| Username Enumeration | Different error messages | Enables credential stuffing with demonstrated account compromise |
+| Rate Limit Absence | No rate limit on endpoint | Brute-force with demonstrated account compromise |
+| Clickjacking | Non-sensitive page framed | Framed page has state-changing action (delete, transfer) |
+| Info Disclosure (Internal IP) | Private IPs in headers | Internal IP enables SSRF pivot with response data |
+| Email Spoofing | Missing SPF/DKIM/DMARC | Spoofed email delivered to major provider + phishing chain |
+| Subdomain Takeover | Dangling CNAME | Claimed subdomain serves attacker-controlled content |
+| Host Header Injection | Reflected in response | Password reset poisoning or cache poisoning PoC |
+| Expired/Weak TLS | TLS 1.0/weak ciphers | Demonstrated MITM or downgrade attack PoC |
+
+**Decision logic**: For each finding, match vuln_class against this table. If matched and the "VALID Only When" condition lacks evidence → BLOCK submission and return to Phase 5.5 escalation with the specific chain requirement.
+
+---
+
 ## AI Usage Compliance (MANDATORY)
 
 Both HackerOne and Intigriti permit AI tools but require responsible use. **Every report MUST comply:**

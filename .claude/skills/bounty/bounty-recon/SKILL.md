@@ -20,20 +20,21 @@ Shared reconnaissance pipeline for bug bounty platforms. Invoked by `/intigriti`
    - **Full out-of-scope list** (application-level AND mobile/desktop-specific exclusions)
    - Any program-specific rules or testing limitations
 2. **Map each vuln type to the program's bounty table**: Use the ACTUAL reward amounts from this specific program — don't assume generic values. Rank attack vectors from highest to lowest payout.
-3. **Start with the program's stated worst-case scenarios** — these are what the triagers care about most and signal what they'll pay top bounty for
-4. **Cross-reference every planned test against the OOS list** BEFORE executing it. If a vuln type is excluded, don't waste time testing it regardless of how easy it might be to find.
-5. **Chain findings for impact escalation** — a low-severity finding chained with another can reach Critical. Always think about chains that multiply impact.
-6. **Drop low-impact findings quickly** if they don't chain into something bigger
-7. **Check mobile/desktop-specific exclusions separately** — programs often have a dedicated exclusion list for mobile that differs from web. Read it before any APK/IPA analysis.
-8. **VDP vs bounty program assessment**: If the program has no bounty table (listed_bounty = 0 or "Vulnerability Disclosure Program"), it's a VDP. VDPs sometimes award bonuses but it's unpredictable. **Strategy**:
+3. **Query hunt memory**: `python3 tools/hunt_memory.py suggest --tech "<detected_stack>"`. Cross-reference successful patterns from past engagements. Prioritize vuln classes with high historical payout and success rate.
+4. **Start with the program's stated worst-case scenarios** — these are what the triagers care about most and signal what they'll pay top bounty for
+5. **Scope enforcement**: `tools/scope_checker.py` verifies every target at runtime. Still review the OOS list during planning to avoid wasting time on excluded vuln types.
+6. **Chain findings for impact escalation** — a low-severity finding chained with another can reach Critical. Always think about chains that multiply impact. Consult the **Chain Lookup Table** in AGENTS.md.
+7. **Drop low-impact findings quickly** if they don't chain into something bigger
+8. **Check mobile/desktop-specific exclusions separately** — programs often have a dedicated exclusion list for mobile that differs from web. Read it before any APK/IPA analysis.
+9. **VDP vs bounty program assessment**: If the program has no bounty table (listed_bounty = 0 or "Vulnerability Disclosure Program"), it's a VDP. VDPs sometimes award bonuses but it's unpredictable. **Strategy**:
    - VDP: Only invest time if the finding is exceptional (Critical/High with full E2E chain). Do NOT burn hours on Medium/Low findings for VDPs — the expected payout is near zero.
    - Bounty program: Full effort justified. Prioritize by bounty table amounts.
    - If testing multiple programs in parallel, allocate 80%+ time to bounty programs, VDPs only for leftover time or exceptional opportunities.
-9. **Duplicate risk assessment**: Before testing, estimate how likely your findings will be duplicates:
+10. **Duplicate risk assessment**: Before testing, estimate how likely your findings will be duplicates:
    - **High duplicate risk** (reduce time investment): Program has been live for months/years, large researcher community, low-hanging fruit vuln types (open redirect, info disclosure, missing headers, version disclosure). On these programs, hunt business logic flaws and complex chains — not scanner findings.
    - **Low duplicate risk** (invest more): New program (< 30 days), small researcher pool, niche technology stack, complex business logic. On these, speed matters — report quickly with maximum detail.
    - **Live hacking events / time-limited programs**: Pure speed. Report fast with enough detail to hold the finding, then supplement with full PoC.
-10. **Program focus strategy (80/20 rule)**: When the researcher works across multiple programs:
+11. **Program focus strategy (80/20 rule)**: When the researcher works across multiple programs:
     - **Concentrate 80% of effort on 3-5 programs** where you have accumulated context (local findings, environment setup, technology understanding, past submissions).
     - **Use 20% for exploration** of new programs to discover fresh attack surface.
     - **Deprioritize programs** with high rejection rates (>50% rejected) unless you understand why and can change your approach.

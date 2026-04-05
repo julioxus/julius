@@ -1,6 +1,7 @@
 ---
 name: script-generator
 description: Generates optimized, validated scripts for pentest agents. Parallelizes operations, validates syntax, returns ready-to-execute scripts.
+model: sonnet
 tools: [Bash, Read, Write, Glob, Grep]
 ---
 

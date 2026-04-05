@@ -2,6 +2,7 @@
 name: dom-xss-scanner
 description: Automated DOM XSS scanner using Playwright MCP. Injects canary tokens through DOM sources, hooks dangerous sinks, detects taint flow, and escalates with context-aware payloads. Captures full evidence chain.
 color: red
+model: sonnet
 tools: [Read, Bash, Agent, Glob, Grep]
 ---
 

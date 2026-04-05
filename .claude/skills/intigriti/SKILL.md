@@ -16,13 +16,15 @@ Automates Intigriti workflows: scope parsing → mobile app acquisition → reco
    → Fetch domains, tiers, rules of engagement, and testing requirements
    → Extract testingRequirements (User-Agent, headers) for scope contract
 3. Parse scope: extract assets, tiers, types, and program rules
-4. For mobile assets: use /mobile-app-acquisition to detect emulators and download apps
-5. Run /bounty-recon for prioritization + recon pipeline (recon only, no agent deployment)
-6. Invoke /pentest in sub-orchestrator mode (testing engine)
-7. MANDATORY: Invoke /bounty-validation skill for PoC validation + pre-submission gate + AI compliance
-   → This is NOT optional. Do NOT declare reports ready without running this skill.
-   → /bounty-validation enforces: anti-hallucination checks, AI disclosure, evidence quality, OOS checks
-8. Generate Intigriti-formatted reports (only after /bounty-validation passes)
+4. Generate scope.json: `python3 tools/scope_checker.py generate --domains '<in-scope>' --oos '<oos>' --output outputs/intigriti-{program}/scope.json`
+5. For mobile assets: use /mobile-app-acquisition to detect emulators and download apps
+6. Run /bounty-recon for prioritization + recon pipeline (recon only, no agent deployment)
+7. **Autopilot decision**: Ask user — "Autopilot mode? (paranoid/normal/yolo/no)". If yes → invoke `/autopilot`. If no → invoke `/pentest` directly.
+8. Invoke /pentest in sub-orchestrator mode OR /autopilot (testing engine)
+9. MANDATORY: Invoke /bounty-validation skill for PoC validation + pre-submission gate + AI compliance
+   → /bounty-validation enforces: anti-hallucination checks, AI disclosure, evidence quality, OOS checks, never-submit list
+10. Record validated findings: `python3 tools/hunt_memory.py record ...` for each finding
+11. Generate Intigriti-formatted reports (only after /bounty-validation passes)
 ```
 
 ## Scope Input Methods
@@ -129,6 +131,7 @@ context:
   bounty_table: {} # parsed from program rules
   oos_list: [] # parsed from rules of engagement
   test_types: ["dast"] # bounty programs are dynamic testing
+  scope_file: "outputs/intigriti-{program}/scope.json" # generated from API/PDF for deterministic scope checking
   testing_requirements:
     user_agent: "from testingRequirements.userAgent"
     request_header: "from testingRequirements.requestHeader"
