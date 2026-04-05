@@ -25,7 +25,12 @@ MEMORY_DIR = os.path.expanduser("~/.claude/projects/-Users-jmartinez-repos-juliu
 def scan_engagement_dir(engagement_path):
     """Extract key metrics from an engagement directory."""
     name = os.path.basename(engagement_path)
-    program_handle = name.replace("intigriti-", "")
+    if name.startswith("hackerone-"):
+        program_handle = name.replace("hackerone-", "")
+        platform = "hackerone"
+    else:
+        program_handle = name.replace("intigriti-", "")
+        platform = "intigriti"
 
     findings_dir = os.path.join(engagement_path, "findings")
     submissions_dir = os.path.join(engagement_path, "reports", "submissions")
@@ -57,6 +62,7 @@ def scan_engagement_dir(engagement_path):
 
     return {
         "handle": program_handle,
+        "platform": platform,
         "dir": engagement_path,
         "total_files": len(all_files),
         "findings_count": len(findings),
@@ -179,7 +185,9 @@ def main():
     # 1. Scan engagement directories
     print("[*] Scanning engagement directories...")
     engagements = []
-    for d in sorted(glob.glob(os.path.join(OUTPUTS_DIR, "intigriti-*/"))):
+    all_dirs = (glob.glob(os.path.join(OUTPUTS_DIR, "intigriti-*/")) +
+                glob.glob(os.path.join(OUTPUTS_DIR, "hackerone-*/")))
+    for d in sorted(all_dirs):
         if "inbox" in d:
             continue
         eng = scan_engagement_dir(d)
@@ -239,7 +247,8 @@ def main():
         "explored_not_submitted": explored_not_submitted,
         "memories": memories,
         "engagements_summary": [
-            {"handle": e["handle"], "findings": e["findings_count"],
+            {"handle": e["handle"], "platform": e.get("platform", "intigriti"),
+             "findings": e["findings_count"],
              "submissions": e["submissions_count"], "files": e["total_files"]}
             for e in engagements
         ],

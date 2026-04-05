@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Intigriti Bounty Forecaster
-Reads inbox export and projects earnings under different scenarios.
+Bounty Forecaster
+Reads inbox export (Intigriti + HackerOne) and projects earnings under different scenarios.
 All amounts normalized to EUR.
 
 Usage:
-  python3 bounty_forecast.py outputs/intigriti-inbox/report_latest.json
-  python3 bounty_forecast.py outputs/intigriti-inbox/report_latest.json --eur-rates '{"USD":0.93,"GBP":1.18}'
+  python3 bounty_forecast.py outputs/combined-inbox/report_latest.json
+  python3 bounty_forecast.py outputs/combined-inbox/report_latest.json --eur-rates '{"USD":0.93,"GBP":1.18}'
 """
 
 import argparse
@@ -108,7 +108,16 @@ INTIGRITI_DEFAULT_VALIDATION_DAYS = {
     "Low": round(15 * 1.4),          # 21
 }
 
-# Extra buffer: time from submission to Intigriti picking it up (before validation starts)
+# HackerOne default validation times (calendar days) by severity.
+# Company-managed triage (not platform-managed like Intigriti).
+HACKERONE_DEFAULT_VALIDATION_DAYS = {
+    "Critical": 5,
+    "High": 7,
+    "Medium": 14,
+    "Low": 21,
+}
+
+# Extra buffer: time from submission to platform picking it up (before validation starts)
 TRIAGE_PICKUP_BUFFER_DAYS = 3
 
 
@@ -230,12 +239,14 @@ def build_monthly_breakdown(payout_conversions, scored_pending, report, today=No
             })
 
     # --- Fetch program validation times (from API or defaults) ---
-    # Collect unique program handles from pending submissions
+    # Collect unique Intigriti program handles from pending submissions
+    # (HackerOne programs don't use the Intigriti API for validation times)
     program_handles = {}
     for s in scored_pending:
         company = s.get("company", "")
         handle = s.get("program_handle", "")
-        if company and handle and company not in program_handles:
+        platform = s.get("platform", "intigriti")
+        if company and handle and company not in program_handles and platform == "intigriti":
             program_handles[company] = handle
 
     # Fetch custom validation times from programs that publish them
@@ -259,10 +270,14 @@ def build_monthly_breakdown(payout_conversions, scored_pending, report, today=No
         except (ValueError, TypeError):
             d_created = today
 
-        # Use program-specific times if available, else Intigriti defaults
+        # Use program-specific times if available, else platform defaults
+        platform = s.get("platform", "intigriti")
         if company in custom_times and severity in custom_times[company]:
             validation_days = custom_times[company][severity]
             source = "program"
+        elif platform == "hackerone":
+            validation_days = HACKERONE_DEFAULT_VALIDATION_DAYS.get(severity, 14)
+            source = "hackerone-default"
         else:
             validation_days = INTIGRITI_DEFAULT_VALIDATION_DAYS.get(severity, 21)
             source = "intigriti-default"
@@ -334,7 +349,10 @@ def build_monthly_breakdown(payout_conversions, scored_pending, report, today=No
 
     # Build triage stats summary for display
     triage_stats = {
-        "default_validation_days": INTIGRITI_DEFAULT_VALIDATION_DAYS,
+        "default_validation_days": {
+            "intigriti": INTIGRITI_DEFAULT_VALIDATION_DAYS,
+            "hackerone": HACKERONE_DEFAULT_VALIDATION_DAYS,
+        },
         "pickup_buffer_days": TRIAGE_PICKUP_BUFFER_DAYS,
         "programs": {
             company: info
@@ -445,7 +463,11 @@ def forecast(report, current_rates, historical_rate=None, ai_evaluations=None, p
     today = date.today()
     for s in scored:
         severity = s.get("severity", "Medium")
-        validation_days = INTIGRITI_DEFAULT_VALIDATION_DAYS.get(severity, 21)
+        platform = s.get("platform", "intigriti")
+        if platform == "hackerone":
+            validation_days = HACKERONE_DEFAULT_VALIDATION_DAYS.get(severity, 14)
+        else:
+            validation_days = INTIGRITI_DEFAULT_VALIDATION_DAYS.get(severity, 21)
         total_days = validation_days + TRIAGE_PICKUP_BUFFER_DAYS
         created = s.get("created_at", "")
         try:
@@ -552,7 +574,7 @@ def forecast(report, current_rates, historical_rate=None, ai_evaluations=None, p
 
 def print_forecast(fc):
     print(f"\n{'='*65}")
-    print(f"INTIGRITI BOUNTY FORECAST (EUR)")
+    print(f"BOUNTY FORECAST (EUR)")
     print(f"{'='*65}")
     if fc['historical_acceptance_rate']:
         print(f"Historical acceptance rate: {fc['historical_acceptance_rate']:.0%}")
@@ -599,7 +621,7 @@ def print_forecast(fc):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Forecast Intigriti bounty earnings (EUR)")
+    parser = argparse.ArgumentParser(description="Forecast bounty earnings across platforms (EUR)")
     parser.add_argument("report", help="Path to report_latest.json from inbox_exporter")
     parser.add_argument("--eur-rates", help="JSON with currency->EUR rates", default=None)
     parser.add_argument("--ai-evaluations", help="Path to ai_evaluation.json from ai_triager.py")

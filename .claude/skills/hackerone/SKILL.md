@@ -40,7 +40,7 @@ Automates HackerOne workflows: scope parsing → mobile app acquisition → reco
 - [ ] Parse CSV scope file
 - [ ] Extract eligible_for_submission=true assets
 - [ ] Collect program guidelines
-- [ ] Generate scope.json: `python3 tools/scope_checker.py generate --domains '<in-scope>' --oos '<oos>' --output outputs/{program}/scope.json`
+- [ ] Generate scope.json: `python3 tools/scope_checker.py generate --domains '<in-scope>' --oos '<oos>' --output outputs/hackerone-{program}/scope.json`
 - [ ] Run /bounty-recon (recon only → testing_recommendations.md)
 - [ ] Invoke /pentest with scope contract (Phase 3-5, includes scope_file)
 - [ ] Run /bounty-validation on findings
@@ -59,18 +59,18 @@ targets: # parsed from CSV eligible assets
     tier: 1  # derived from max_severity
     restrictions: "from CSV instruction field"
 engagement_name: "{program-name}"
-output_base: "outputs/{program}/"
+output_base: "outputs/hackerone-{program}/"
 context:
   platform: "hackerone"
   bounty_table: {} # parsed from program page
   oos_list: [] # parsed from program scope
   test_types: ["dast"] # bounty programs are dynamic testing
-  recon_path: "outputs/{program}/processed/reconnaissance/"
-  testing_recommendations: "outputs/{program}/processed/reconnaissance/testing_recommendations.md"
-  scope_file: "outputs/{program}/scope.json" # generated from CSV for deterministic scope checking
+  recon_path: "outputs/hackerone-{program}/processed/reconnaissance/"
+  testing_recommendations: "outputs/hackerone-{program}/processed/reconnaissance/testing_recommendations.md"
+  scope_file: "outputs/hackerone-{program}/scope.json" # generated from CSV for deterministic scope checking
 ```
 
-`/pentest` runs Phase 3 (user approves attack plan), Phase 4 (deploy executors), Phase 5 (aggregate findings). Findings land in `outputs/{program}/processed/findings/`.
+`/pentest` runs Phase 3 (user approves attack plan), Phase 4 (deploy executors), Phase 5 (aggregate findings). Findings land in `outputs/hackerone-{program}/processed/findings/`.
 
 ## Scope CSV Format
 
@@ -119,10 +119,12 @@ Use `tools/report_validator.py` to validate.
 
 ## Output Structure
 
+**IMPORTANT**: All HackerOne engagement directories MUST use the `hackerone-` prefix: `outputs/hackerone-{program}/`. This convention enables the bounty-forecast pipeline to detect platform automatically.
+
 Per OUTPUT.md - Bug Bounty format:
 
 ```
-outputs/<program>/
+outputs/hackerone-<program>/
 ├── apps/                         # Downloaded mobile apps
 │   ├── <package>.apk
 │   └── <bundle>.ipa

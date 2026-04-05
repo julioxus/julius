@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Pending Reports Scanner — finds INTI_*_*.md reports not yet submitted to Intigriti.
+Pending Reports Scanner — finds INTI_*_*.md and H1_*_*.md reports not yet submitted.
 
-Scans outputs/intigriti-*/reports/submissions/INTI_*_*.md, cross-references with
-Intigriti API submissions, and checks program status.
+Scans outputs/intigriti-*/reports/submissions/INTI_*_*.md and
+outputs/hackerone-*/reports/submissions/H1_*_*.md, cross-references with
+platform APIs, and checks program status.
 
 Usage:
-  python3 pending_reports_scanner.py --output outputs/intigriti-inbox/pending_reports.json
+  python3 pending_reports_scanner.py --output outputs/combined-inbox/pending_reports.json
 """
 
 import argparse
@@ -121,24 +122,34 @@ def extract_severity_from_md(filepath):
 
 
 def scan_local_reports(base_dir):
-    """Scan for all INTI_*_*.md files in outputs/intigriti-*/reports/submissions/."""
-    pattern = os.path.join(base_dir, "outputs", "intigriti-*", "reports", "submissions", "INTI_*_*.md")
-    files = glob(pattern)
+    """Scan for INTI_*_*.md and H1_*_*.md files in outputs/*/reports/submissions/."""
+    inti_pattern = os.path.join(base_dir, "outputs", "intigriti-*", "reports", "submissions", "INTI_*_*.md")
+    h1_pattern = os.path.join(base_dir, "outputs", "hackerone-*", "reports", "submissions", "H1_*_*.md")
+    files = glob(inti_pattern) + glob(h1_pattern)
     reports = []
     for f in sorted(files):
         parts = Path(f).parts
-        # Extract program directory name (intigriti-{name})
+        filename = Path(f).name
+        # Detect platform from filename prefix
+        if filename.startswith("H1_"):
+            platform = "hackerone"
+            prefix = "hackerone-"
+        else:
+            platform = "intigriti"
+            prefix = "intigriti-"
+        # Extract program directory name
         for p in parts:
-            if p.startswith("intigriti-"):
-                program_dir = p.replace("intigriti-", "")
+            if p.startswith(prefix):
+                program_dir = p.replace(prefix, "")
                 break
         else:
             program_dir = "unknown"
 
         reports.append({
             "file": f,
-            "filename": Path(f).name,
+            "filename": filename,
             "program_dir": program_dir,
+            "platform": platform,
             "title": extract_title_from_md(f),
             "severity": extract_severity_from_md(f),
         })
@@ -217,21 +228,63 @@ def resolve_program_handle(program_dir, submissions, cookie=None):
     return None, None
 
 
+def _load_env():
+    """Load .env file from repo root."""
+    env_path = Path(__file__).resolve().parents[4] / ".env"
+    if not env_path.exists():
+        env_path = Path.cwd() / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, val = line.partition("=")
+                os.environ.setdefault(key.strip(), val.strip())
+
+
+def fetch_h1_reports_for_matching():
+    """Fetch H1 reports for cross-referencing. Returns list of dicts with id, title, state."""
+    import base64
+    _load_env()
+    username = os.environ.get("HACKERONE_USERNAME", "")
+    token = os.environ.get("HACKERONE_API_TOKEN", "")
+    if not username or not token:
+        return []
+    creds = base64.b64encode(f"{username}:{token}".encode()).decode()
+    reports = []
+    url = "https://api.hackerone.com/v1/hackers/me/reports?page%5Bsize%5D=100"
+    while url:
+        try:
+            req = urllib.request.Request(url)
+            req.add_header("Authorization", f"Basic {creds}")
+            req.add_header("Accept", "application/json")
+            req.add_header("User-Agent", "PendingScanner/1.0")
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            for item in data.get("data", []):
+                attrs = item.get("attributes", {})
+                reports.append({
+                    "id": item.get("id"),
+                    "title": attrs.get("title", ""),
+                    "state": {"status": attrs.get("state", "new")},
+                })
+            url = data.get("links", {}).get("next")
+        except (urllib.error.HTTPError, urllib.error.URLError):
+            break
+    return reports
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Scan for pending INTI reports not yet submitted")
+    parser = argparse.ArgumentParser(description="Scan for pending local reports not yet submitted")
     parser.add_argument("--base-dir", default=".", help="Repository root directory")
-    parser.add_argument("--output", default="outputs/intigriti-inbox/pending_reports.json")
+    parser.add_argument("--output", default="outputs/combined-inbox/pending_reports.json")
     args = parser.parse_args()
 
-    cookie = get_cookie()
-    if not cookie:
-        print("[!] No Intigriti session cookie. Run intigriti_auth.py first.", file=sys.stderr)
-        sys.exit(1)
-
-    # Step 1: Scan local INTI reports
-    print("[*] Scanning for local INTI_*_*.md reports...")
+    # Step 1: Scan local reports (both INTI and H1)
+    print("[*] Scanning for local INTI_*_*.md and H1_*_*.md reports...")
     local_reports = scan_local_reports(args.base_dir)
-    print(f"[+] Found {len(local_reports)} local INTI reports")
+    inti_reports = [r for r in local_reports if r.get("platform") == "intigriti"]
+    h1_reports = [r for r in local_reports if r.get("platform") == "hackerone"]
+    print(f"[+] Found {len(inti_reports)} INTI + {len(h1_reports)} H1 = {len(local_reports)} local reports")
 
     if not local_reports:
         print("[*] No local reports found.")
@@ -240,62 +293,78 @@ def main():
         Path(args.output).write_text(json.dumps(result, indent=2))
         return
 
-    # Step 2: Fetch all submissions from Intigriti
-    print("[*] Fetching submissions from Intigriti API...")
-    submissions = fetch_all_submissions(cookie)
-    print(f"[+] Found {len(submissions)} submissions on Intigriti")
+    # Step 2: Fetch submissions from both platforms
+    inti_submissions = []
+    cookie = get_cookie()
+    if cookie and inti_reports:
+        print("[*] Fetching submissions from Intigriti API...")
+        inti_submissions = fetch_all_submissions(cookie)
+        print(f"[+] Found {len(inti_submissions)} submissions on Intigriti")
+    elif inti_reports:
+        print("[!] No Intigriti session cookie — skipping INTI cross-reference")
 
-    # Step 3: Cross-reference
-    print("[*] Cross-referencing local reports with Intigriti submissions...")
+    h1_submissions = []
+    if h1_reports:
+        print("[*] Fetching submissions from HackerOne API...")
+        h1_submissions = fetch_h1_reports_for_matching()
+        print(f"[+] Found {len(h1_submissions)} submissions on HackerOne")
+
+    # Step 3: Cross-reference by platform
+    print("[*] Cross-referencing local reports with platform submissions...")
     pending = []
     already_submitted = []
     program_dirs_seen = set()
 
     for report in local_reports:
-        match = match_submission(report["title"], submissions, program_dir=report["program_dir"])
+        if report.get("platform") == "hackerone":
+            subs = h1_submissions
+        else:
+            subs = inti_submissions
+        match = match_submission(report["title"], subs, program_dir=report["program_dir"])
         if match:
             already_submitted.append({
                 **report,
                 "submission_id": match["id"],
-                "submission_status": match["state"]["status"],
+                "submission_status": match.get("state", {}).get("status"),
             })
         else:
             pending.append(report)
-        program_dirs_seen.add(report["program_dir"])
+        program_dirs_seen.add((report["program_dir"], report.get("platform", "intigriti")))
 
     print(f"[+] Pending (not submitted): {len(pending)}")
     print(f"[+] Already submitted: {len(already_submitted)}")
 
-    # Step 4: Check program status for pending reports
+    # Step 4: Check program status for pending Intigriti reports
     print("[*] Checking program status for pending reports...")
     STATUS_MAP = {1: "draft", 2: "review", 3: "open", 4: "suspended", 5: "closed"}
     program_status = {}
 
-    for pd in program_dirs_seen:
-        ch, ph = resolve_program_handle(pd, submissions, cookie=cookie)
-        if ch and ph:
-            status_code, name = fetch_program_status(ch, ph, cookie)
-            program_status[pd] = {
-                "company_handle": ch,
-                "program_handle": ph,
-                "name": name,
-                "status": STATUS_MAP.get(status_code, "unknown"),
-                "status_code": status_code,
-            }
-        else:
-            # Try direct lookup with program_dir as both handles
-            try:
-                # Search in the full program list
-                status_code, name = 0, ""
+    for pd, platform in program_dirs_seen:
+        if platform == "intigriti" and cookie:
+            ch, ph = resolve_program_handle(pd, inti_submissions, cookie=cookie)
+            if ch and ph:
+                status_code, name = fetch_program_status(ch, ph, cookie)
                 program_status[pd] = {
-                    "company_handle": pd,
-                    "program_handle": pd,
-                    "name": pd,
-                    "status": "unknown",
-                    "status_code": 0,
+                    "company_handle": ch,
+                    "program_handle": ph,
+                    "name": name,
+                    "platform": "intigriti",
+                    "status": STATUS_MAP.get(status_code, "unknown"),
+                    "status_code": status_code,
                 }
-            except Exception:
-                pass
+            else:
+                program_status[pd] = {
+                    "company_handle": pd, "program_handle": pd,
+                    "name": pd, "platform": "intigriti",
+                    "status": "unknown", "status_code": 0,
+                }
+        elif platform == "hackerone":
+            # H1 programs: mark as open (no easy status check via API)
+            program_status[pd] = {
+                "company_handle": pd, "program_handle": pd,
+                "name": pd, "platform": "hackerone",
+                "status": "open", "status_code": 3,
+            }
 
     # Annotate pending reports with program status
     for p in pending:
@@ -328,8 +397,9 @@ def main():
     print("PENDING REPORTS (not yet submitted)")
     print(f"{'='*60}")
     for p in pending:
+        platform_tag = f"[{p.get('platform', 'inti').upper()[:4]}]"
         status_tag = f"[{p['program_status'].upper()}]" if p["program_status"] != "open" else ""
-        print(f"  {p['filename']:<35} {p['severity']:<8} {p['program_name']} {status_tag}")
+        print(f"  {platform_tag} {p['filename']:<35} {p['severity']:<8} {p['program_name']} {status_tag}")
         print(f"    {p['title'][:80]}")
 
 

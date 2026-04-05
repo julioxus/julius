@@ -133,7 +133,7 @@ api.example.com,URL,,true,true,critical
 ## Output Structure
 
 ```
-outputs/<program_name>/
+outputs/hackerone-<program_name>/
 ├── findings/
 │   ├── findings.json              # Machine-readable findings
 │   ├── finding-001/
