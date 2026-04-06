@@ -53,6 +53,26 @@ def _detect_platform_from_dir(dirname: str) -> tuple[str, str]:
     return "unknown", dirname
 
 
+def _normalize_handle(platform: str, handle: str, company: str = "") -> str:
+    """Normalize program handle to a canonical form.
+
+    For Intigriti, the canonical form is 'company/program' (from directory names).
+    For HackerOne, it's just the handle.
+    Handles from report_latest.json may be short ('altera') or long ('altera/altera').
+    Directory names are always the short form ('intigriti-altera' → 'altera').
+    We use the short form as canonical to avoid duplication.
+    """
+    if platform == "hackerone":
+        return handle
+    # For Intigriti: strip to shortest unique form
+    # "altera/altera" → "altera", "company/program" stays as-is if different
+    if "/" in handle:
+        parts = handle.split("/", 1)
+        if parts[0] == parts[1]:
+            return parts[0]  # "altera/altera" → "altera"
+    return handle
+
+
 def _extract_severity_from_md(content: str) -> tuple[str, str]:
     """Extract severity and CVSS from markdown content."""
     severity = ""
@@ -90,7 +110,8 @@ def import_report_json(base_dir: Path):
     for sub in all_subs:
         company = sub.get("company") or sub.get("program") or "Unknown"
         platform = sub.get("platform", "intigriti")
-        handle = sub.get("program_handle") or sub.get("company_handle") or company.lower().replace(" ", "-")
+        raw_handle = sub.get("program_handle") or sub.get("company_handle") or company.lower().replace(" ", "-")
+        handle = _normalize_handle(platform, raw_handle, company)
 
         cache_key = f"{platform}:{handle}"
         if cache_key not in program_cache:
@@ -383,6 +404,131 @@ def import_submission_reports(base_dir: Path):
     print(f"  Imported {count} submission reports")
 
 
+def sync_report_statuses():
+    """Cross-reference submission_reports with submissions to update report status.
+
+    Maps platform disposition → report status:
+      - resolved/accepted → accepted
+      - duplicate/informative/not_applicable/wont_fix/out_of_scope → rejected
+      - triaged → submitted (confirmed by platform)
+      - new/needs_more_info → submitted (pending)
+    """
+    session = get_session()
+    from sqlalchemy import select
+
+    DISPOSITION_TO_STATUS = {
+        "resolved": "accepted",
+        "accepted": "accepted",
+        "duplicate": "rejected",
+        "informative": "rejected",
+        "not_applicable": "rejected",
+        "wont_fix": "rejected",
+        "out_of_scope": "rejected",
+        "triaged": "submitted",
+        "new": "submitted",
+        "needs_more_info": "submitted",
+    }
+
+    # Find all submission_reports and try to match with submissions
+    reports = session.scalars(select(SubmissionReport)).all()
+    updated = 0
+
+    for report in reports:
+        # Try to match by title similarity with submissions from same program
+        subs = session.scalars(
+            select(Submission).where(Submission.program_id == report.program_id)
+        ).all()
+
+        best_match = None
+        best_score = 0
+
+        for sub in subs:
+            if not sub.title or not report.title:
+                continue
+            # Simple word overlap matching
+            report_words = set(report.title.lower().split()[:8])
+            sub_words = set(sub.title.lower().split()[:8])
+            if not report_words or not sub_words:
+                continue
+            overlap = len(report_words & sub_words) / max(len(report_words), len(sub_words))
+            if overlap > best_score and overlap > 0.3:
+                best_score = overlap
+                best_match = sub
+
+        if best_match:
+            new_status = DISPOSITION_TO_STATUS.get(best_match.disposition, "submitted")
+            if report.status != new_status:
+                report.status = new_status
+                report.platform_submission_id = best_match.platform_id
+                updated += 1
+
+    session.commit()
+    session.close()
+    print(f"  Updated {updated} report statuses from platform data")
+
+
+def deduplicate_programs():
+    """Merge duplicate programs that have the same company_name + platform but different handles."""
+    session = get_session()
+
+    # Find duplicates: same (platform, company_name) with multiple handles
+    from sqlalchemy import func, select
+    dupes = session.execute(
+        select(Program.platform, Program.company_name, func.count(Program.id).label("cnt"))
+        .group_by(Program.platform, Program.company_name)
+        .having(func.count(Program.id) > 1)
+    ).all()
+
+    merged = 0
+    for platform, company, cnt in dupes:
+        programs = session.scalars(
+            select(Program)
+            .where(Program.platform == platform, Program.company_name == company)
+            .order_by(Program.id)
+        ).all()
+
+        # Keep the one with most submissions (or lowest ID as tiebreaker)
+        keep = programs[0]
+        max_subs = 0
+        for p in programs:
+            sub_count = session.scalar(
+                select(func.count(Submission.id)).where(Submission.program_id == p.id)
+            ) or 0
+            if sub_count > max_subs:
+                max_subs = sub_count
+                keep = p
+
+        # Merge others into keep
+        for p in programs:
+            if p.id == keep.id:
+                continue
+            # Re-parent submissions
+            session.execute(
+                Submission.__table__.update().where(Submission.program_id == p.id).values(program_id=keep.id)
+            )
+            # Re-parent findings
+            session.execute(
+                Finding.__table__.update().where(Finding.program_id == p.id).values(program_id=keep.id)
+            )
+            # Re-parent reports
+            session.execute(
+                SubmissionReport.__table__.update().where(SubmissionReport.program_id == p.id).values(program_id=keep.id)
+            )
+            # Merge notes
+            if p.notes and p.notes not in (keep.notes or ""):
+                keep.notes = (keep.notes or "") + "\n" + p.notes
+            # Merge tech_stack
+            if p.tech_stack:
+                keep.tech_stack = list(set((keep.tech_stack or []) + p.tech_stack))
+            # Delete the duplicate
+            session.delete(p)
+            merged += 1
+
+    session.commit()
+    session.close()
+    print(f"  Merged {merged} duplicate programs")
+
+
 def run_full_import(base_dir: Path | None = None):
     """Run all import steps."""
     if base_dir is None:
@@ -405,6 +551,12 @@ def run_full_import(base_dir: Path | None = None):
 
     print("[5/5] Importing submission reports...")
     import_submission_reports(base_dir)
+
+    print("[6/7] Deduplicating programs...")
+    deduplicate_programs()
+
+    print("[7/7] Syncing report statuses from platform data...")
+    sync_report_statuses()
 
     print()
     print("Import complete.")

@@ -25,6 +25,10 @@ def cmd_migrate(args):
         base_dir = Path(args.base_dir) if args.base_dir else None
         run_full_import(base_dir)
 
+    if getattr(args, "dedup", False):
+        from bounty_intel.migration.import_existing import deduplicate_programs
+        deduplicate_programs()
+
 
 def cmd_sync(args):
     from bounty_intel.sync.delta import sync_all
@@ -101,6 +105,7 @@ def main():
     # migrate
     p_migrate = subparsers.add_parser("migrate", help="Create DB schema and optionally import data")
     p_migrate.add_argument("--import", dest="do_import", action="store_true", help="Import existing data")
+    p_migrate.add_argument("--dedup", action="store_true", help="Deduplicate programs with same name")
     p_migrate.add_argument("--base-dir", help="Path to julius repo root")
 
     # sync

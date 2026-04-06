@@ -8,13 +8,15 @@
 <div class="pipeline">
   {% for status, reports in pipeline.items() %}
   <div class="pipeline-col">
-    <h3>{{ status|capitalize }} <span class="badge badge-gray">{{ reports|length }}</span></h3>
+    <h3>{{ status|upper }} <span class="badge {% if status == 'accepted' %}badge-green{% elif status == 'rejected' %}badge-red{% elif status == 'submitted' %}badge-purple{% else %}badge-gray{% endif %}">{{ reports|length }}</span></h3>
     {% for r in reports %}
     <a href="/reports/{{ r.id }}" class="pipeline-card" style="display:block;text-decoration:none;color:inherit">
       <div class="title">{{ r.title[:40] }}{% if r.title|length > 40 %}...{% endif %}</div>
       <div class="meta">
         <span class="badge {{ severity_badge(r.severity or '') }}">{{ r.severity }}</span>
-        {{ r.platform }} &middot; {{ r.report_slug }}
+        {{ r.platform }}
+        {% if r.report_slug %}&middot; {{ r.report_slug }}{% endif %}
+        {% if r.platform_submission_id %}<br><span class="muted" style="font-size:0.7rem">#{{ r.platform_submission_id }}</span>{% endif %}
         <br>{{ days_ago(r.updated_at) }}
       </div>
     </a>

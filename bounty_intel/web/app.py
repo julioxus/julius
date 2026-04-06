@@ -294,7 +294,8 @@ async def reports_list(request: Request):
         "validated": [r for r in all_reports if r.status == "validated"],
         "ready": [r for r in all_reports if r.status == "ready"],
         "submitted": [r for r in all_reports if r.status == "submitted"],
-        "resolved": [r for r in all_reports if r.status in ("accepted", "rejected")],
+        "accepted": [r for r in all_reports if r.status == "accepted"],
+        "rejected": [r for r in all_reports if r.status == "rejected"],
     }
 
     return _render(request, "reports.html", {

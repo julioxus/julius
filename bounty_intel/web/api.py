@@ -301,6 +301,21 @@ async def api_forecast():
     return compute_forecast()
 
 
+# ── Admin ────────────────────────────────────────────────────
+@router.post("/admin/dedup-programs", dependencies=[Depends(verify_api_key)])
+async def dedup_programs():
+    from bounty_intel.migration.import_existing import deduplicate_programs
+    deduplicate_programs()
+    return {"ok": True}
+
+
+@router.post("/admin/sync-report-statuses", dependencies=[Depends(verify_api_key)])
+async def sync_report_statuses_endpoint():
+    from bounty_intel.migration.import_existing import sync_report_statuses
+    sync_report_statuses()
+    return {"ok": True}
+
+
 # ── Stats ────────────────────────────────────────────────────
 @router.get("/stats", dependencies=[Depends(verify_api_key)])
 async def api_stats():
