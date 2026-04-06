@@ -159,12 +159,21 @@ def import_report_json(base_dir: Path):
         session.commit()
 
         for payout in sub.get("payouts", []):
+            amount = Decimal(str(payout.get("amount", 0)))
+            currency = payout.get("currency", "EUR")
+            payout_type = payout.get("type", "Bounty")
+            # Dedup: skip if same (submission_id, amount, currency, payout_type) already exists
+            existing_payout = session.query(Payout).filter_by(
+                submission_id=submission_id, amount=amount, currency=currency, payout_type=payout_type
+            ).first()
+            if existing_payout:
+                continue
             session.add(Payout(
                 submission_id=submission_id,
-                amount=Decimal(str(payout.get("amount", 0))),
-                currency=payout.get("currency", "EUR"),
+                amount=amount,
+                currency=currency,
                 amount_eur=Decimal(str(payout.get("amount_eur", 0))) if payout.get("amount_eur") else None,
-                payout_type=payout.get("type", "Bounty"),
+                payout_type=payout_type,
                 status=payout.get("status", "Paid"),
                 paid_date=payout.get("paid_date"),
             ))
@@ -242,15 +251,24 @@ def import_hunt_memory(base_dir: Path):
             if not line:
                 continue
             entry = json.loads(line)
+            target = entry.get("target", "")
+            vuln_class = entry.get("vuln_class", "unknown")
+            technique = entry.get("technique_summary", "")
+            # Dedup by (target, vuln_class, technique_summary)
+            existing = session.query(HuntMemory).filter_by(
+                target=target, vuln_class=vuln_class, technique_summary=technique
+            ).first()
+            if existing:
+                continue
             session.add(HuntMemory(
-                target=entry.get("target", ""),
+                target=target,
                 domain=entry.get("domain"),
-                vuln_class=entry.get("vuln_class", "unknown"),
+                vuln_class=vuln_class,
                 tech_stack=entry.get("tech_stack", []),
                 success=entry.get("success", False),
                 payout=Decimal(str(entry.get("payout", 0))),
                 severity=entry.get("severity", ""),
-                technique_summary=entry.get("technique_summary", ""),
+                technique_summary=technique,
                 chain=entry.get("chain"),
                 platform=entry.get("platform", ""),
                 recorded_at=_parse_iso(entry.get("timestamp")),
