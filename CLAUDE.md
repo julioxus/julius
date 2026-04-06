@@ -2,7 +2,7 @@
 
 This repo provides Claude Code skills and agents for security testing, bug bounty hunting, and pentesting workflows.
 
-## Architecture: AGENTS.md + Skills
+## Architecture: AGENTS.md + Skills + Bounty Intel DB
 
 **IMPORTANT**: Based on Vercel research, this repository uses a hybrid architecture:
 
@@ -21,17 +21,38 @@ This repo provides Claude Code skills and agents for security testing, bug bount
 - User preference gathering and decision workflows
 - Examples: `/pentest`, `/hackerone`, `/authenticating`
 
+**Bounty Intel** (`bounty_intel/`):
+- **PostgreSQL database** (Cloud SQL) — single source of truth for all engagement data
+- **Web dashboard** (Cloud Run) — operations center with recon, findings, reports, submissions
+- **REST API** — programmatic access for skills and agents
+- **Sync engine** — auto-syncs submissions from HackerOne and Intigriti APIs
+- **Forecast engine** — earnings projections with AI evaluation
+
 **Why this works better**:
 - Eliminates decision-making friction (no "should I load the skill?" question)
 - Consistent availability (AGENTS.md always present, skills loaded on-demand)
 - No sequencing problems (passive knowledge + explicit workflows)
 - Faster context access (no async skill loading delay)
+- All operational data centralized in DB (no scattered local files)
 
 **Reference**: [Vercel Blog - AGENTS.md outperforms skills in our agent evals](https://vercel.com/blog/agents-md-outperforms-skills-in-our-agent-evals)
 
 ## Repository Structure
 
 - `AGENTS.md` - **Passive security testing knowledge base** (always loaded)
+- `bounty_intel/` - **Bounty Intelligence System** (DB-backed ops center):
+    - `db.py` - 12 SQLAlchemy models (programs, engagements, findings, submissions, payouts, evidence, etc.)
+    - `service.py` - Database service layer (CRUD for all entities)
+    - `client.py` - HTTP client for skills/agents (`BountyIntelClient`)
+    - `config.py` - Environment config (DB, GCS, OAuth, API keys)
+    - `cli.py` - CLI: `python -m bounty_intel {migrate|sync|forecast|serve|stats}`
+    - `sync/` - Platform sync (HackerOne delta, Intigriti auto-browser-login)
+    - `forecast/` - Earnings projection engine
+    - `migration/` - Schema creation + data import from legacy files
+    - `web/` - FastAPI dashboard (12 pages, HTMX, TailwindCSS, Google OAuth)
+        - `app.py` - Routes + template rendering
+        - `api.py` - REST API endpoints (all CRUD + sync + forecast)
+        - `templates/` - Jinja2 templates (dashboard, programs, findings, reports, etc.)
 - `.claude/skills/` - **Workflow orchestration skills** (user-triggered):
   - **Orchestrators** (top-level for slash command discovery):
     - `pentest/` - Canonical testing engine (11 attack categories, 186 docs)
@@ -58,13 +79,12 @@ This repo provides Claude Code skills and agents for security testing, bug bount
 - `tools/` - Shared Python tools and external tool installers:
     - `scope_checker.py` - Deterministic scope validation (anchored suffix matching, CIDR, OOS deny-first)
     - `safety_rails.py` - Circuit breaker + rate limiter + safe method policy
-    - `hunt_memory.py` - JSONL cross-target pattern DB (what worked where, sorted by payout)
     - Installers: Playwright, Kali, RecoX
 - `templates/` - Skill templates
 
 ## Bounty Intel API — Source of Truth
 
-**CRITICAL**: When asked about bug bounty programs, engagements, findings, recon data, attack surface, submissions, or any engagement context, **always query the Bounty Intel API first**. This is the single source of truth for all operational data.
+**CRITICAL**: When asked about bug bounty programs, engagements, findings, recon data, attack surface, submissions, or any engagement context, **always query the Bounty Intel API first**. This is the single source of truth for all operational data. The legacy `outputs/` directory has been removed — all data lives in the database.
 
 **How to access** (from skills/agents):
 ```python
@@ -78,13 +98,19 @@ surface = db.get_attack_surface(program_id)      # scope, coverage, stats
 findings = db.get_findings(program_id=program_id) # discovered vulnerabilities
 evidence = db.get_finding_evidence(finding_id)   # PoC files, HTTP logs
 submissions = db.get_submissions(program_id=program_id) # platform-synced status
+hunt = db.suggest_attacks(tech_stack=["react", "graphql"]) # attack suggestions
+forecast = db.forecast()                          # earnings projection
 ```
 
-**Available endpoints**: `/api/v1/programs`, `/programs/{id}/recon`, `/programs/{id}/attack-surface`, `/findings`, `/findings/{id}/evidence`, `/submissions`, `/reports`, `/hunt`, `/hunt/suggest`, `/forecast`, `/stats`
+**Available endpoints**: `/api/v1/programs`, `/programs/{id}/recon`, `/programs/{id}/attack-surface`, `/findings`, `/findings/{id}/evidence`, `/submissions`, `/reports`, `/hunt`, `/hunt/suggest`, `/forecast`, `/stats`, `/sync`, `/activity`, `/evaluations`
 
 **Dashboard**: https://bounty-dashboard-887002731862.europe-west1.run.app
 
-Do NOT rely on memory files or outputs/ directory for engagement state — always check the API for current data.
+**DB contents** (40 programs, 403 findings, 3,204 evidence files, 1,941 activity logs, recon data for 26 engagements, attack surface for 34 engagements)
+
+**Infrastructure**: Cloud SQL (europe-west1), Cloud Run, GCS (julius-bounty-evidence), Secret Manager, Google OAuth
+
+Do NOT rely on memory files or local directories for engagement state — always check the API for current data.
 
 ## Git Conventions
 
@@ -135,14 +161,16 @@ git checkout -b feature/skill-name
 
 ## Output Standards
 
-**CRITICAL**: All skills follow standardized output formats.
+**CRITICAL**: All skills write results to the Bounty Intel database via `BountyIntelClient`, not to local files.
 
-See `.claude/OUTPUT_STANDARDS.md` for complete specification.
+See `.claude/OUTPUT_STANDARDS.md` for format specification.
 
-**Three formats**:
-- **Reconnaissance**: inventory/ + analysis/ → testing checklist
-- **Vulnerability testing**: findings/ + evidence/ → actionable reports
-- **Bug bounty**: Platform-ready submissions (HackerOne, Bugcrowd)
+**Workflow**: Skill runs → saves findings/evidence to DB via API → dashboard displays results → user reviews and submits
+
+**Data flow**:
+- **Reconnaissance**: `db.update_engagement(id, recon_data=...)` + `db.update_engagement(id, attack_surface=...)`
+- **Vulnerability testing**: `db.save_finding(program_id=..., title=..., poc_code=..., ...)` + evidence files
+- **Bug bounty**: `db.create_report(...)` → validate → `db.mark_report_submitted(...)`
 
 ## Critical Rules
 
