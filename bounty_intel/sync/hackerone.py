@@ -14,8 +14,19 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from bounty_intel.config import settings
-from bounty_intel.db import Payout, Program, Submission, get_session
+from bounty_intel.db import Payout, Program, Submission, SubmissionReport, get_session
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+DISPOSITION_TO_REPORT_STATUS = {
+    "resolved": "accepted",
+    "duplicate": "rejected",
+    "informative": "rejected",
+    "not_applicable": "rejected",
+    "triaged": "submitted",
+    "new": "submitted",
+    "needs_more_info": "submitted",
+}
 
 H1_API_BASE = "https://api.hackerone.com/v1"
 
@@ -230,6 +241,16 @@ def sync(since: datetime | None = None) -> dict:
                     status=p["status"],
                     paid_date=p["paid_date"],
                 ))
+
+        # Sync report status: if a submission_report is linked, update its status
+        platform_id_str = str(report.get("id", ""))
+        linked_report = session.scalar(
+            select(SubmissionReport).where(SubmissionReport.platform_submission_id == platform_id_str)
+        )
+        if linked_report:
+            new_status = DISPOSITION_TO_REPORT_STATUS.get(disposition, linked_report.status)
+            if linked_report.status != new_status:
+                linked_report.status = new_status
 
         upserted += 1
         if last_updated and (max_updated is None or last_updated > max_updated):
