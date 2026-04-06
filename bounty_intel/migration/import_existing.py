@@ -362,14 +362,33 @@ def _classify_recon_file(filepath: Path) -> str:
     return "other"
 
 
-def _read_recon_file(filepath: Path, max_bytes: int = 50_000) -> str:
-    """Read a recon file, truncating if too large."""
+def _is_binary_file(filepath: Path) -> bool:
+    """Check if a file is binary by reading first 8KB."""
     try:
+        chunk = filepath.read_bytes()[:8192]
+        # Null bytes are a strong indicator of binary content
+        if b"\x00" in chunk:
+            return True
+        # Check for high ratio of non-text bytes
+        text_chars = set(range(32, 127)) | {9, 10, 13}  # printable + tab/newline/cr
+        non_text = sum(1 for b in chunk if b not in text_chars)
+        return non_text / max(len(chunk), 1) > 0.3
+    except OSError:
+        return True
+
+
+def _read_recon_file(filepath: Path, max_bytes: int = 50_000) -> str:
+    """Read a recon file, truncating if too large. Skips binary files."""
+    try:
+        if _is_binary_file(filepath):
+            return ""
         size = filepath.stat().st_size
         if size > max_bytes:
             content = filepath.read_text(errors="replace")[:max_bytes]
             return content + f"\n... [truncated, {size} bytes total]"
-        return filepath.read_text(errors="replace")
+        content = filepath.read_text(errors="replace")
+        # Strip null bytes that PostgreSQL JSONB cannot store
+        return content.replace("\x00", "")
     except (OSError, UnicodeDecodeError):
         return ""
 
@@ -425,7 +444,13 @@ def import_recon_data(base_dir: Path):
             for filepath in sorted(recon_dir.rglob("*")):
                 if not filepath.is_file():
                     continue
-                if filepath.suffix.lower() in (".pyc", ".class", ".exe", ".bin", ".so", ".dylib"):
+                if filepath.suffix.lower() in (
+                    ".pyc", ".class", ".exe", ".bin", ".so", ".dylib",
+                    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg",
+                    ".mp4", ".mp3", ".wav", ".zip", ".gz", ".tar", ".rar",
+                    ".pdf", ".woff", ".woff2", ".ttf", ".eot", ".xapk", ".apk",
+                    ".dex", ".jar", ".dSYM",
+                ):
                     continue
 
                 category = _classify_recon_file(filepath)
