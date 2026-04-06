@@ -992,7 +992,7 @@ def import_submission_reports(base_dir: Path):
                 severity=severity,
                 cvss_vector=cvss,
                 markdown_body=content,
-                status="submitted",
+                status="draft",
             ))
             count += 1
 
