@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}{{ finding.title[:60] }} - Bounty Intel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="muted" style="font-size:0.85rem;margin-bottom:0.3rem">
+      <a href="/programs/{{ program.id }}" style="color:var(--accent);text-decoration:none">{{ program.company_name }}</a>
+      &rsaquo; Finding #{{ finding.id }}
+    </div>
+    <h1>{{ finding.title }}</h1>
+  </div>
+  <div class="actions">
+    <span class="badge {{ severity_badge(finding.severity or '') }}" style="font-size:0.9rem;padding:4px 12px">{{ finding.severity or '?' }}</span>
+    <span class="badge {{ status_badge(finding.status) }}" style="font-size:0.9rem;padding:4px 12px">{{ finding.status }}</span>
+    {% if finding.is_building_block %}<span class="badge badge-orange" style="font-size:0.9rem;padding:4px 12px">Building Block</span>{% endif %}
+  </div>
+</div>
+
+<div class="grid" style="grid-template-columns: 1fr 1fr 1fr 1fr; margin-bottom: 1.5rem">
+  <div class="card">
+    <div class="card-label">Vulnerability Class</div>
+    <div style="font-size:1.1rem;font-weight:600">{{ finding.vuln_class or 'Unclassified' }}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">CVSS</div>
+    <div class="mono" style="font-size:0.9rem">{{ finding.cvss_vector or 'Not set' }}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Discovered</div>
+    <div>{{ days_ago(finding.created_at) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Last Updated</div>
+    <div>{{ days_ago(finding.updated_at) }}</div>
+  </div>
+</div>
+
+{% if finding.building_block_notes %}
+<div class="insight-box warn">
+  <strong>Building Block Notes:</strong> {{ finding.building_block_notes }}
+</div>
+{% endif %}
+
+{% if finding.chain_with %}
+<div class="insight-box">
+  <strong>Chains with findings:</strong> {{ finding.chain_with | join(', ') }}
+</div>
+{% endif %}
+
+<!-- Description -->
+{% if finding.description %}
+<h2>Description</h2>
+<div class="card preview-pane" style="margin-bottom:1.5rem">
+  {{ rendered_desc | safe }}
+</div>
+{% endif %}
+
+<!-- Steps to Reproduce -->
+{% if finding.steps_to_reproduce %}
+<h2>Steps to Reproduce</h2>
+<div class="card preview-pane" style="margin-bottom:1.5rem">
+  {{ rendered_steps | safe }}
+</div>
+{% endif %}
+
+<!-- Impact -->
+{% if finding.impact %}
+<h2>Impact</h2>
+<div class="card preview-pane" style="margin-bottom:1.5rem">
+  {{ rendered_impact | safe }}
+</div>
+{% endif %}
+
+<!-- PoC Code -->
+{% if finding.poc_code %}
+<h2>Proof of Concept</h2>
+<div class="card" style="margin-bottom:1.5rem">
+  <pre style="background:var(--bg);padding:1rem;border-radius:6px;overflow-x:auto;margin:0"><code>{{ finding.poc_code }}</code></pre>
+</div>
+{% endif %}
+
+<!-- PoC Output -->
+{% if finding.poc_output %}
+<h2>PoC Output</h2>
+<div class="card" style="margin-bottom:1.5rem">
+  <pre style="background:var(--bg);padding:1rem;border-radius:6px;overflow-x:auto;margin:0;color:var(--green);font-size:0.85rem">{{ finding.poc_output }}</pre>
+</div>
+{% endif %}
+
+{% endblock %}

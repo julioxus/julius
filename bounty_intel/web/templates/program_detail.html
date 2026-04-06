@@ -30,28 +30,30 @@
 
 <!-- Findings Tab -->
 <div id="tab-findings" class="tab-content">
+{% if findings %}
 <table>
-  <thead><tr><th>Title</th><th>Class</th><th>Severity</th><th>Status</th><th>Date</th></tr></thead>
+  <thead><tr><th>Title</th><th>Class</th><th>Severity</th><th>Status</th><th>Date</th><th></th></tr></thead>
   <tbody>
     {% for f in findings %}
-    <tr class="expandable">
-      <td>{{ f.title[:60] }}{% if f.title|length > 60 %}...{% endif %}</td>
+    <tr>
+      <td>
+        <a href="/findings/{{ f.id }}" style="color:var(--text);text-decoration:none;font-weight:500">
+          {{ f.title[:60] }}{% if f.title|length > 60 %}...{% endif %}
+        </a>
+        {% if f.is_building_block %}<span class="badge badge-orange" style="margin-left:0.3rem">BB</span>{% endif %}
+      </td>
       <td><span class="badge badge-gray">{{ f.vuln_class or '?' }}</span></td>
       <td><span class="badge {{ severity_badge(f.severity or '') }}">{{ f.severity or '?' }}</span></td>
       <td><span class="badge {{ status_badge(f.status) }}">{{ f.status }}</span></td>
       <td class="muted">{{ days_ago(f.created_at) }}</td>
-    </tr>
-    <tr class="detail-row">
-      <td colspan="5">
-        <div class="detail-panel">
-          {% if f.description %}<div style="max-height:200px;overflow-y:auto;margin-bottom:0.5rem">{{ f.description[:500] }}</div>{% endif %}
-          {% if f.is_building_block %}<div class="badge badge-orange">Building Block</div> {{ f.building_block_notes }}{% endif %}
-        </div>
-      </td>
+      <td><a href="/findings/{{ f.id }}" class="btn btn-sm">View</a></td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+{% else %}
+<div class="insight-box">No findings for this program yet.</div>
+{% endif %}
 </div>
 
 <!-- Building Blocks Tab -->

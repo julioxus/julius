@@ -259,20 +259,41 @@ async def program_detail(request: Request, program_id: int):
 # 4.4 — Findings Browser
 # ──────────────────────────────────────────────────────────────
 @app.get("/findings", response_class=HTMLResponse)
-async def findings_list(request: Request, severity: str = "", vuln_class: str = "", status: str = "", building_blocks: str = ""):
+async def findings_list(request: Request):
+    """Findings are explored per-program — redirect to programs page."""
+    return RedirectResponse("/programs", status_code=302)
+
+
+@app.get("/findings/{finding_id}", response_class=HTMLResponse)
+async def finding_detail(request: Request, finding_id: int):
     from bounty_intel import service
+    from bounty_intel.db import Finding, get_session
 
-    
-    findings = service.get_findings(
-        severity=severity or None,
-        vuln_class=vuln_class or None,
-        status=status or None,
-        is_building_block=True if building_blocks == "1" else None,
+    session = get_session()
+    finding = session.get(Finding, finding_id)
+    if not finding:
+        session.close()
+        return HTMLResponse("Finding not found", status_code=404)
+
+    program = finding.program
+    rendered_desc = markdown.markdown(
+        finding.description or "", extensions=["fenced_code", "tables"]
     )
+    rendered_steps = markdown.markdown(
+        finding.steps_to_reproduce or "", extensions=["fenced_code", "tables"]
+    )
+    rendered_impact = markdown.markdown(
+        finding.impact or "", extensions=["fenced_code", "tables"]
+    )
+    session.close()
 
-    return _render(request, "findings.html", {
-        "active_page": "findings",
-        "findings": findings,
+    return _render(request, "finding_detail.html", {
+        "active_page": "programs",
+        "finding": finding,
+        "program": program,
+        "rendered_desc": rendered_desc,
+        "rendered_steps": rendered_steps,
+        "rendered_impact": rendered_impact,
         "severity_badge": _severity_badge,
         "status_badge": _status_badge,
         "days_ago": _days_ago,
