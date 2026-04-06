@@ -30,13 +30,14 @@ Built on top of [Transilience AI Community Tools](https://github.com/transilienc
 | **Vulnerability management** | DefectDojo orchestrator (scope analysis, SAST/DAST via /pentest, API import) |
 | **Vendor assessment** | Non-intrusive third-party security evaluation (DNS, supply chain, SAST, compliance) |
 | **Safety tools** | Deterministic scope checker, circuit breaker + rate limiter, cross-target hunt memory |
+| **MCP server** | 36 `bounty_*` tools auto-loaded — programs, findings, reports, evidence, payouts, hunt memory, forecast |
 | **Tool integrations** | Burp Suite MCP, HexStrike AI (150+ tools), Playwright, Kali toolset, RecoX |
 
 ---
 
 ## Bounty Intel — Operations Center
 
-All operational data lives in a **PostgreSQL database** (Cloud SQL) served by a **FastAPI dashboard on Cloud Run**. Skills and agents use `BountyIntelClient` as the single source of truth — no local files.
+All operational data lives in a **PostgreSQL database** (Cloud SQL) served by a **FastAPI dashboard on Cloud Run**. A **MCP server** (`bounty-intel`) auto-loads 36 tools when Claude starts in this project, making all operations naturally available without explicit instructions. Skills and agents use these `bounty_*` MCP tools as the single source of truth — no local files.
 
 **Dashboard URL**: `https://bounty-dashboard-887002731862.europe-west1.run.app`
 
@@ -58,25 +59,33 @@ All operational data lives in a **PostgreSQL database** (Cloud SQL) served by a 
 ### Data flow
 
 ```
+MCP Server (bounty-intel, 36 tools, auto-loaded via .mcp.json)
+  │
+  ├── bounty_save_finding()                     → findings table
+  ├── bounty_create_report()                    → submission_reports table
+  ├── bounty_record_hunt()                      → hunt_memory table
+  ├── bounty_log_activity()                     → activity_log table
+  ├── bounty_upload_evidence()                  → evidence_files + GCS
+  ├── bounty_update_engagement(recon_data=...)  → recon data (JSONB)
+  └── bounty_update_engagement(attack_surface=...) → attack surface (JSONB)
+  
 Skills (/pentest, /intigriti, /hackerone)
   │
-  ├── db.save_finding()                    → findings table
-  ├── db.create_report()                   → submission_reports table
-  ├── db.record_hunt()                     → hunt_memory table
-  ├── db.log_activity()                    → activity_log table
-  ├── db.update_engagement(recon_data=...) → recon data (JSONB)
-  └── db.update_engagement(attack_surface=...)  → attack surface (JSONB)
+  └── Call bounty_* MCP tools directly (no imports needed)
   
 Platform Sync (Intigriti API, HackerOne API)
   │
-  └── POST /api/v1/sync           → submissions + payouts + dispositions
+  └── bounty_sync(source="all")       → submissions + payouts + dispositions
   
-REST API (for skills)
+Queries (natural language → MCP tool discovery)
   │
-  ├── GET /api/v1/programs/{id}/recon         → structured recon data
-  ├── GET /api/v1/programs/{id}/attack-surface → scope + coverage stats
-  ├── GET /api/v1/findings/{id}/evidence      → evidence file metadata
-  └── Full CRUD on programs, findings, reports, submissions, hunt memory
+  ├── bounty_get_findings(program_id=...)       → vulnerability list
+  ├── bounty_search_findings(query="SSRF")      → text search
+  ├── bounty_get_program(program_id)            → scope, OOS, tech stack
+  ├── bounty_get_recon(program_id)              → structured recon data
+  ├── bounty_get_payouts(program_id=...)        → earnings data
+  ├── bounty_suggest_attacks(tech_stack=[...])  → hunt intelligence
+  └── bounty_forecast()                         → earnings projection
 
 Dashboard (web UI, 12 pages)
   │
@@ -143,7 +152,7 @@ Two entry points depending on platform:
    ├── Phase 3: Attack plan from recon + recommendations → user approves
    ├── Phase 4: pentester-orchestrator dispatches parallel executor batches
    │   ├── pentester-executor agents (3-5 per batch, up to 15 concurrent)
-   │   ├── Each finding → api.save_finding() immediately
+   │   ├── Each finding → bounty_save_finding() via MCP
    │   └── DOM XSS scanner, conditional skills (/cve-testing, /source-code-scanning, etc.)
    └── Phase 5: Aggregate findings, deduplicate, identify chains
 
@@ -157,7 +166,7 @@ Two entry points depending on platform:
    ├── pentester-validator: 5 anti-hallucination checks per finding
    ├── Never-Submit List: 17 conditional items
    ├── Pre-submission gate: OOS, business logic, impact honesty
-   └── Validated findings → api.create_report() + api.record_hunt()
+   └── Validated findings → bounty_create_report() + bounty_record_hunt()
 
 6. SUBMISSION
    Reports reviewed in Bounty Intel dashboard (Report Manager)
@@ -257,7 +266,7 @@ Canonical testing engine. 8 phases, 40+ attack types across 11 categories.
 |------|---------|---------|
 | **Scope Checker** | `python3 tools/scope_checker.py check <target> --scope scope.json` | Deterministic in-scope/OOS validation. Anchored suffix matching, CIDR support, OOS deny-first. |
 | **Safety Rails** | `python3 tools/safety_rails.py preflight <METHOD> <URL>` | Circuit breaker (5 failures → 300s cooldown), rate limiter (10 rps recon / 2 rps active), safe method policy. |
-| **Hunt Memory** | `db.suggest_attacks(tech_stack)` | Cross-target pattern DB in PostgreSQL. Records what worked where, sorted by payout. |
+| **Hunt Memory** | `bounty_suggest_attacks(tech_stack=[...])` | Cross-target pattern DB in PostgreSQL. Records what worked where, sorted by payout. |
 | **Autopilot** | `/autopilot --mode normal` | Autonomous surface-by-surface hunt loop. 3 modes: paranoid, normal, yolo. |
 
 ---
@@ -275,7 +284,7 @@ pentester-orchestrator → pentester-executor (×N parallel) → pentester-valid
 | Agent | Role |
 |-------|------|
 | **pentester-orchestrator** | Pure manager. Plans, dispatches parallel executor batches, adapts. Never executes directly. |
-| **pentester-executor** | Thin runner. Missions + skill folder, 3+ escalation levels, writeup-style findings. Persists to DB via `api.save_finding()`. |
+| **pentester-executor** | Thin runner. Missions + skill folder, 3+ escalation levels, writeup-style findings. Persists via `bounty_save_finding()` MCP tool. |
 | **pentester-validator** | 5 mandatory anti-hallucination checks per finding. |
 | **dom-xss-scanner** | Canary tokens through DOM sources, hooks sinks, detects taint flow via Playwright. |
 | **script-generator** | Parallelized, syntax-validated PoC scripts. |
@@ -291,12 +300,14 @@ pentester-orchestrator → pentester-executor (×N parallel) → pentester-valid
 julius/
 ├── AGENTS.md                        # Passive knowledge base (always loaded)
 ├── CLAUDE.md                        # Repository instructions
+├── .mcp.json                        # MCP server auto-start config
 ├── bounty_intel/                    # Bounty Intel ops center (Cloud Run app)
+│   ├── mcp_server.py                # MCP server (36 tools, FastMCP)
 │   ├── db.py                        # SQLAlchemy models (12 tables)
 │   ├── service.py                   # Database service layer (CRUD)
-│   ├── client.py                    # HTTP client for skills (BountyIntelClient)
+│   ├── client.py                    # HTTP client (BountyIntelClient, used by MCP server)
 │   ├── config.py                    # Environment config (pydantic-settings)
-│   ├── cli.py                       # CLI: migrate, sync, forecast, serve, stats
+│   ├── cli.py                       # CLI: migrate, sync, forecast, serve, mcp, stats
 │   ├── web/                         # FastAPI dashboard (12 pages)
 │   │   ├── app.py                   # Routes, OAuth, evidence preview
 │   │   ├── api.py                   # REST API (/api/v1/* — recon, surface, evidence, CRUD)
@@ -372,7 +383,7 @@ claude .
 ### Environment setup
 
 ```bash
-# Required for Bounty Intel API access (skills use this)
+# .env — Required for Bounty Intel API access (MCP server reads these)
 BOUNTY_INTEL_API_URL=https://bounty-dashboard-887002731862.europe-west1.run.app
 BOUNTY_INTEL_API_KEY=<your-api-key>
 
@@ -380,17 +391,40 @@ BOUNTY_INTEL_API_KEY=<your-api-key>
 HACKERONE_USERNAME=<username>
 HACKERONE_API_TOKEN=<token>
 
-# Bounty Intel CLI (direct DB access for local admin)
+# Install dependencies (includes MCP server)
+pip install -e .
+
+# Bounty Intel CLI
 python -m bounty_intel migrate     # Create/update schema
 python -m bounty_intel sync        # Sync submissions from platforms
 python -m bounty_intel forecast    # Compute earnings forecast
 python -m bounty_intel serve       # Run dashboard locally
+python -m bounty_intel mcp         # Start MCP server (stdio transport)
 python -m bounty_intel stats       # DB inventory
 
 # Optional tools
 bash tools/kali/install.sh        # Kali tools
 bash tools/playwright/install.sh   # Browser automation (needed for Intigriti sync)
 ```
+
+### MCP Server
+
+The `bounty-intel` MCP server starts automatically when Claude Code opens this project (configured in `.mcp.json`). It exposes 36 tools covering the full Bounty Intel API:
+
+| Domain | Tools | Examples |
+|--------|-------|---------|
+| Programs (3) | list, get detail, upsert | `bounty_list_programs(platform="hackerone")` |
+| Engagements (4) | list, get, create, update | `bounty_list_engagements(status="active")` |
+| Recon (2) | get recon, get attack surface | `bounty_get_recon(program_id=5)` |
+| Findings (7) | list, get, search, save, update, evidence, delete | `bounty_search_findings("SSRF")` |
+| Reports (7) | list, get, create, update, delete, submit, evidence | `bounty_get_report(report_id=12)` |
+| Submissions (1) | list with filters | `bounty_get_submissions(disposition="triaged")` |
+| Payouts (1) | list with filters | `bounty_get_payouts(program_id=5)` |
+| Hunt Memory (3) | record, suggest, query | `bounty_suggest_attacks(tech_stack=["react"])` |
+| Evidence (2) | upload, get signed URL | `bounty_upload_evidence(finding_id=42, ...)` |
+| Activity (2) | log, list | `bounty_get_activity(engagement_id=10)` |
+| AI Eval (1) | save evaluation | `bounty_save_ai_evaluation(submission_id=1, ...)` |
+| Ops (3) | sync, forecast, stats | `bounty_forecast()` |
 
 ---
 
