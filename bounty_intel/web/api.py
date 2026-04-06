@@ -182,6 +182,27 @@ async def update_engagement(engagement_id: int, data: EngagementUpdate):
     return {"ok": True}
 
 
+# ── Program Recon & Attack Surface ──────────────────────────
+@router.get("/programs/{program_id}/recon", dependencies=[Depends(verify_api_key)])
+async def get_program_recon(program_id: int):
+    from bounty_intel import service
+
+    eng = service.get_engagement_by_program(program_id)
+    if not eng:
+        raise HTTPException(404, "No engagement found for this program")
+    return eng.recon_data or {}
+
+
+@router.get("/programs/{program_id}/attack-surface", dependencies=[Depends(verify_api_key)])
+async def get_attack_surface(program_id: int):
+    from bounty_intel import service
+
+    eng = service.get_engagement_by_program(program_id)
+    if not eng:
+        raise HTTPException(404, "No engagement found for this program")
+    return eng.attack_surface or {}
+
+
 # ── Findings ─────────────────────────────────────────────────
 @router.get("/findings", dependencies=[Depends(verify_api_key)])
 async def list_findings(program_id: int = 0, status: str = "", vuln_class: str = "",
@@ -242,6 +263,17 @@ async def delete_finding(finding_id: int):
     session.commit()
     session.close()
     return {"ok": True}
+
+
+# ── Evidence ────────────────────────────────────────────────
+@router.get("/findings/{finding_id}/evidence", dependencies=[Depends(verify_api_key)])
+async def get_finding_evidence(finding_id: int):
+    from bounty_intel import service
+
+    files = service.get_finding_evidence(finding_id)
+    return [{"id": f.id, "filename": f.filename, "content_type": f.content_type or "",
+             "size_bytes": f.size_bytes or 0, "local_path": f.local_path or "",
+             "gcs_path": f.gcs_path or ""} for f in files]
 
 
 # ── Reports ──────────────────────────────────────────────────

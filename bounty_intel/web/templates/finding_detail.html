@@ -96,4 +96,32 @@
 </div>
 {% endif %}
 
+<!-- Evidence Files -->
+{% if evidence_files %}
+<h2>Evidence Files <span class="badge badge-blue">{{ evidence_files|length }}</span></h2>
+<div class="card" style="margin-bottom:1.5rem">
+  <table>
+    <thead><tr><th>File</th><th>Type</th><th>Size</th><th></th></tr></thead>
+    <tbody>
+      {% for ef in evidence_files %}
+      <tr>
+        <td class="mono" style="font-size:0.85rem">{{ ef.filename }}</td>
+        <td><span class="badge badge-gray">{{ ef.content_type or 'unknown' }}</span></td>
+        <td class="muted">{% if ef.size_bytes %}{{ (ef.size_bytes / 1024)|round(1) }} KB{% else %}?{% endif %}</td>
+        <td>
+          {% if ef.content_type and (ef.content_type.startswith('text/') or ef.content_type in ('application/json', 'application/xml')) %}
+          <button class="btn btn-sm"
+                  hx-get="/evidence/{{ ef.id }}/preview"
+                  hx-target="#evidence-preview-{{ ef.id }}"
+                  hx-swap="innerHTML">Preview</button>
+          {% endif %}
+        </td>
+      </tr>
+      <tr><td colspan="4" id="evidence-preview-{{ ef.id }}"></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {% endblock %}

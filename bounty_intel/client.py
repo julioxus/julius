@@ -85,6 +85,27 @@ class BountyIntelClient:
         self._patch(f"/api/v1/engagements/{engagement_id}", kwargs)
 
     # ------------------------------------------------------------------
+    # Recon & Attack Surface
+    # ------------------------------------------------------------------
+    def get_program_recon(self, program_id: int) -> dict:
+        """Get structured recon data for a program."""
+        try:
+            return self._get(f"/api/v1/programs/{program_id}/recon")
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                return {}
+            raise
+
+    def get_attack_surface(self, program_id: int) -> dict:
+        """Get attack surface summary for a program."""
+        try:
+            return self._get(f"/api/v1/programs/{program_id}/attack-surface")
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                return {}
+            raise
+
+    # ------------------------------------------------------------------
     # Findings
     # ------------------------------------------------------------------
     def get_findings(self, *, program_id: int | None = None, status: str | None = None,
@@ -106,6 +127,10 @@ class BountyIntelClient:
 
     def update_finding(self, finding_id: int, **kwargs) -> None:
         self._patch(f"/api/v1/findings/{finding_id}", kwargs)
+
+    def get_finding_evidence(self, finding_id: int) -> list[dict]:
+        """Get evidence files associated with a finding."""
+        return self._get(f"/api/v1/findings/{finding_id}/evidence")
 
     def delete_finding(self, finding_id: int) -> None:
         resp = requests.delete(f"{self.api_url}/api/v1/findings/{finding_id}",

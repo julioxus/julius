@@ -23,7 +23,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from bounty_intel.db import (
     AIEvaluation,
+    ActivityLog,
     Engagement,
+    EvidenceFile,
     Finding,
     HuntMemory,
     Payout,
@@ -344,6 +346,558 @@ def import_local_findings(base_dir: Path):
     print(f"  Imported {finding_count} findings across {engagement_count} new engagements")
 
 
+def _classify_recon_file(filepath: Path) -> str:
+    """Classify a recon file into a category based on name patterns."""
+    name = filepath.name.lower()
+    if "subdomain" in name or "subdomains" in name:
+        return "subdomains"
+    if "endpoint" in name or "api" in name and name.endswith((".txt", ".md")):
+        return "endpoints"
+    if "openapi" in name or "graphql" in name or "swagger" in name:
+        return "api_specs"
+    if "live_host" in name or "live-host" in name:
+        return "live_hosts"
+    if "summary" in name:
+        return "summaries"
+    return "other"
+
+
+def _read_recon_file(filepath: Path, max_bytes: int = 50_000) -> str:
+    """Read a recon file, truncating if too large."""
+    try:
+        size = filepath.stat().st_size
+        if size > max_bytes:
+            content = filepath.read_text(errors="replace")[:max_bytes]
+            return content + f"\n... [truncated, {size} bytes total]"
+        return filepath.read_text(errors="replace")
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def import_recon_data(base_dir: Path):
+    """Import recon/ directory contents into engagement.recon_data JSONB."""
+    outputs_dir = base_dir / "outputs"
+    if not outputs_dir.exists():
+        print("  Skipping recon data (outputs/ not found)")
+        return
+
+    session = get_session()
+    imported = 0
+
+    for program_dir in sorted(outputs_dir.iterdir()):
+        if not program_dir.is_dir():
+            continue
+        dirname = program_dir.name
+        if dirname in ("combined-inbox", "processed"):
+            continue
+
+        platform, handle = _detect_platform_from_dir(dirname)
+        if platform == "unknown":
+            continue
+
+        # Collect recon files from multiple possible locations
+        recon_dirs = []
+        for candidate in ["recon", "evidence", "processed/reconnaissance"]:
+            d = program_dir / candidate
+            if d.is_dir():
+                recon_dirs.append(d)
+
+        if not recon_dirs:
+            continue
+
+        program = session.query(Program).filter_by(platform=platform, platform_handle=handle).first()
+        if not program:
+            continue
+
+        engagement = session.query(Engagement).filter_by(program_id=program.id).first()
+        if not engagement:
+            engagement = Engagement(program_id=program.id, status="completed")
+            session.add(engagement)
+            session.commit()
+
+        # Build structured recon data
+        recon: dict[str, list] = {
+            "subdomains": [], "endpoints": [], "api_specs": [],
+            "live_hosts": [], "summaries": [], "other": [],
+        }
+
+        for recon_dir in recon_dirs:
+            for filepath in sorted(recon_dir.rglob("*")):
+                if not filepath.is_file():
+                    continue
+                if filepath.suffix.lower() in (".pyc", ".class", ".exe", ".bin", ".so", ".dylib"):
+                    continue
+
+                category = _classify_recon_file(filepath)
+                content = _read_recon_file(filepath)
+                if not content.strip():
+                    continue
+
+                entry = {
+                    "filename": str(filepath.relative_to(program_dir)),
+                    "content": content,
+                }
+
+                # For line-based files, also provide parsed lines
+                if category in ("subdomains", "live_hosts", "endpoints") and filepath.suffix in (".txt", ".csv"):
+                    lines = [l.strip() for l in content.splitlines() if l.strip() and not l.startswith("#")]
+                    entry["lines"] = lines[:10_000]
+                    entry["total_lines"] = len(lines)
+
+                recon[category].append(entry)
+
+        # Only update if we found something
+        total_items = sum(len(v) for v in recon.values())
+        if total_items > 0:
+            engagement.recon_data = recon
+            session.commit()
+            imported += 1
+
+    session.close()
+    print(f"  Imported recon data for {imported} engagements")
+
+
+def import_attack_surface(base_dir: Path):
+    """Derive attack surface from scope.json + recon data into engagement.attack_surface."""
+    outputs_dir = base_dir / "outputs"
+    if not outputs_dir.exists():
+        print("  Skipping attack surface (outputs/ not found)")
+        return
+
+    session = get_session()
+    imported = 0
+
+    for program_dir in sorted(outputs_dir.iterdir()):
+        if not program_dir.is_dir():
+            continue
+        dirname = program_dir.name
+        if dirname in ("combined-inbox", "processed"):
+            continue
+
+        platform, handle = _detect_platform_from_dir(dirname)
+        if platform == "unknown":
+            continue
+
+        program = session.query(Program).filter_by(platform=platform, platform_handle=handle).first()
+        if not program:
+            continue
+
+        engagement = session.query(Engagement).filter_by(program_id=program.id).first()
+        if not engagement:
+            continue
+
+        surface: dict = {}
+
+        # Read scope.json if present
+        scope_file = program_dir / "scope.json"
+        if scope_file.exists():
+            try:
+                scope = json.loads(scope_file.read_text(errors="replace"))
+                surface["domains"] = scope.get("domains", [])
+                surface["ips"] = scope.get("ips", [])
+                surface["oos"] = scope.get("oos", [])
+                surface["domain_count"] = len(surface["domains"])
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # Read PROGRAM.md if present
+        program_md = program_dir / "PROGRAM.md"
+        if program_md.exists():
+            try:
+                surface["program_notes"] = program_md.read_text(errors="replace")[:10_000]
+            except OSError:
+                pass
+
+        # Read SUMMARY.md if present
+        summary_md = program_dir / "SUMMARY.md"
+        if not summary_md.exists():
+            summary_md = program_dir / "findings" / "SUMMARY.md"
+        if summary_md.exists():
+            try:
+                surface["assessment_summary"] = summary_md.read_text(errors="replace")[:10_000]
+            except OSError:
+                pass
+
+        # Derive counts from recon_data
+        recon = engagement.recon_data or {}
+        subdomain_count = 0
+        endpoint_count = 0
+        live_host_count = 0
+        for entry in recon.get("subdomains", []):
+            subdomain_count += entry.get("total_lines", 0) or len(entry.get("lines", []))
+        for entry in recon.get("endpoints", []):
+            endpoint_count += entry.get("total_lines", 0) or len(entry.get("lines", []))
+        for entry in recon.get("live_hosts", []):
+            live_host_count += entry.get("total_lines", 0) or len(entry.get("lines", []))
+
+        surface["subdomain_count"] = subdomain_count
+        surface["endpoint_count"] = endpoint_count
+        surface["live_host_count"] = live_host_count
+        surface["coverage"] = {
+            "subdomains_enumerated": subdomain_count > 0,
+            "endpoints_mapped": endpoint_count > 0,
+            "api_specs_found": len(recon.get("api_specs", [])) > 0,
+            "live_hosts_scanned": live_host_count > 0,
+        }
+
+        if surface:
+            engagement.attack_surface = surface
+            session.commit()
+            imported += 1
+
+    session.close()
+    print(f"  Imported attack surface for {imported} engagements")
+
+
+def _find_poc_file(directory: Path) -> Path | None:
+    """Find a PoC file in a directory."""
+    for pattern in ["poc.py", "poc.sh", "poc.c", "poc.html", "poc.js", "poc_*.py", "poc_*.c"]:
+        matches = list(directory.glob(pattern))
+        if matches:
+            return matches[0]
+    return None
+
+
+def enrich_findings(base_dir: Path):
+    """Enrich existing findings with PoC/workflow data and import top-level findings."""
+    outputs_dir = base_dir / "outputs"
+    if not outputs_dir.exists():
+        print("  Skipping findings enrichment (outputs/ not found)")
+        return
+
+    session = get_session()
+    enriched = 0
+    new_findings = 0
+
+    for program_dir in sorted(outputs_dir.iterdir()):
+        if not program_dir.is_dir():
+            continue
+        dirname = program_dir.name
+        if dirname in ("combined-inbox", "processed"):
+            continue
+
+        platform, handle = _detect_platform_from_dir(dirname)
+        if platform == "unknown":
+            continue
+
+        program = session.query(Program).filter_by(platform=platform, platform_handle=handle).first()
+        if not program:
+            continue
+
+        engagement = session.query(Engagement).filter_by(program_id=program.id).first()
+
+        # Part 1: Enrich processed findings with PoC/workflow
+        processed_dir = program_dir / "processed" / "findings"
+        if processed_dir.exists():
+            for finding_dir in sorted(processed_dir.iterdir()):
+                if not finding_dir.is_dir():
+                    continue
+
+                desc_file = finding_dir / "description.md"
+                if not desc_file.exists():
+                    continue
+
+                content = desc_file.read_text(errors="replace")
+                title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+                title = title_match.group(1).strip() if title_match else finding_dir.name
+
+                existing = session.query(Finding).filter_by(program_id=program.id, title=title).first()
+                if not existing:
+                    continue
+
+                updates = {}
+                # PoC code
+                if not existing.poc_code:
+                    poc_file = _find_poc_file(finding_dir)
+                    if poc_file:
+                        updates["poc_code"] = poc_file.read_text(errors="replace")[:20_000]
+
+                # PoC output
+                if not existing.poc_output:
+                    for name in ["poc_output.txt", "poc_output.json"]:
+                        out_file = finding_dir / name
+                        if out_file.exists():
+                            updates["poc_output"] = out_file.read_text(errors="replace")[:20_000]
+                            break
+
+                # Steps to reproduce
+                if not existing.steps_to_reproduce:
+                    workflow = finding_dir / "workflow.md"
+                    if workflow.exists():
+                        updates["steps_to_reproduce"] = workflow.read_text(errors="replace")[:10_000]
+
+                if updates:
+                    for k, v in updates.items():
+                        setattr(existing, k, v)
+                    enriched += 1
+
+        # Part 2: Import top-level findings (not in processed/)
+        findings_dir = program_dir / "findings"
+        if findings_dir.exists() and findings_dir != processed_dir:
+            for finding_dir in sorted(findings_dir.iterdir()):
+                if not finding_dir.is_dir():
+                    continue
+                if finding_dir.name.upper() == "SUMMARY.MD":
+                    continue
+
+                # Find the main report file
+                report_file = None
+                for candidate in ["report.md", "description.md"]:
+                    f = finding_dir / candidate
+                    if f.exists():
+                        report_file = f
+                        break
+
+                if not report_file:
+                    continue
+
+                content = report_file.read_text(errors="replace")
+                title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+                title = title_match.group(1).strip() if title_match else finding_dir.name
+
+                # Check for existing by title
+                existing = session.query(Finding).filter_by(program_id=program.id, title=title).first()
+                if existing:
+                    continue
+
+                severity, cvss = _extract_severity_from_md(content)
+                vuln_class = ""
+                for vc in ["IDOR", "SSRF", "XSS", "SQLi", "CSRF", "RCE", "auth_bypass", "info_disclosure",
+                           "DoS", "null_deref", "command_injection", "path_traversal"]:
+                    if vc.lower() in content.lower() or vc.lower() in finding_dir.name.lower():
+                        vuln_class = vc
+                        break
+
+                # Ensure engagement exists
+                if not engagement:
+                    engagement = Engagement(program_id=program.id, status="completed")
+                    session.add(engagement)
+                    session.commit()
+
+                poc_code = ""
+                poc_file = _find_poc_file(finding_dir)
+                if poc_file:
+                    poc_code = poc_file.read_text(errors="replace")[:20_000]
+
+                poc_output = ""
+                for name in ["poc_output.txt", "poc_output.json", "crash_evidence.txt"]:
+                    out_file = finding_dir / name
+                    if out_file.exists():
+                        poc_output = out_file.read_text(errors="replace")[:20_000]
+                        break
+
+                session.add(Finding(
+                    engagement_id=engagement.id,
+                    program_id=program.id,
+                    title=title,
+                    vuln_class=vuln_class,
+                    severity=severity,
+                    cvss_vector=cvss,
+                    status="discovered",
+                    description=content[:10_000],
+                    poc_code=poc_code,
+                    poc_output=poc_output,
+                ))
+                new_findings += 1
+
+    session.commit()
+    session.close()
+    print(f"  Enriched {enriched} findings, imported {new_findings} new top-level findings")
+
+
+def import_activity_logs(base_dir: Path):
+    """Import JSONL activity logs from processed/activity/ directories."""
+    outputs_dir = base_dir / "outputs"
+    if not outputs_dir.exists():
+        print("  Skipping activity logs (outputs/ not found)")
+        return
+
+    session = get_session()
+    imported = 0
+
+    for program_dir in sorted(outputs_dir.iterdir()):
+        if not program_dir.is_dir():
+            continue
+        dirname = program_dir.name
+        if dirname in ("combined-inbox", "processed"):
+            continue
+
+        activity_dir = program_dir / "processed" / "activity"
+        if not activity_dir.exists():
+            continue
+
+        platform, handle = _detect_platform_from_dir(dirname)
+        if platform == "unknown":
+            continue
+
+        program = session.query(Program).filter_by(platform=platform, platform_handle=handle).first()
+        if not program:
+            continue
+
+        engagement = session.query(Engagement).filter_by(program_id=program.id).first()
+        if not engagement:
+            continue
+
+        for log_file in sorted(activity_dir.glob("*.log")):
+            try:
+                lines = log_file.read_text(errors="replace").splitlines()
+            except OSError:
+                continue
+
+            batch = []
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                ts = _parse_iso(entry.get("ts")) or _parse_iso(entry.get("timestamp"))
+                action = entry.get("action", "unknown")
+
+                # Dedup check
+                existing = session.query(ActivityLog).filter_by(
+                    engagement_id=engagement.id, action=action, created_at=ts
+                ).first()
+                if existing:
+                    continue
+
+                batch.append(ActivityLog(
+                    engagement_id=engagement.id,
+                    action=action,
+                    details=entry,
+                    created_at=ts,
+                ))
+
+            if batch:
+                session.add_all(batch)
+                session.commit()
+                imported += len(batch)
+
+    session.close()
+    print(f"  Imported {imported} activity log entries")
+
+
+def _guess_content_type(filepath: Path) -> str:
+    """Guess content type from file extension."""
+    import mimetypes
+    ct, _ = mimetypes.guess_type(str(filepath))
+    if ct:
+        return ct
+    ext_map = {
+        ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json",
+        ".html": "text/html", ".py": "text/x-python", ".c": "text/x-c",
+        ".sh": "text/x-shellscript", ".log": "text/plain", ".csv": "text/csv",
+        ".xml": "application/xml", ".yaml": "application/yaml", ".yml": "application/yaml",
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".gif": "image/gif", ".webp": "image/webp", ".mp4": "video/mp4",
+    }
+    return ext_map.get(filepath.suffix.lower(), "application/octet-stream")
+
+
+def import_evidence_metadata(base_dir: Path):
+    """Catalog local evidence files into evidence_files table (no GCS upload)."""
+    outputs_dir = base_dir / "outputs"
+    if not outputs_dir.exists():
+        print("  Skipping evidence metadata (outputs/ not found)")
+        return
+
+    session = get_session()
+    imported = 0
+
+    for program_dir in sorted(outputs_dir.iterdir()):
+        if not program_dir.is_dir():
+            continue
+        dirname = program_dir.name
+        if dirname in ("combined-inbox", "processed"):
+            continue
+
+        platform, handle = _detect_platform_from_dir(dirname)
+        if platform == "unknown":
+            continue
+
+        program = session.query(Program).filter_by(platform=platform, platform_handle=handle).first()
+        if not program:
+            continue
+
+        # Collect all evidence directories
+        evidence_paths: list[tuple[Path, int | None]] = []  # (dir, finding_id or None)
+
+        # Top-level evidence/
+        top_evidence = program_dir / "evidence"
+        if top_evidence.is_dir():
+            evidence_paths.append((top_evidence, None))
+
+        # Per-finding evidence in processed/findings/*/evidence/
+        for finding_parent in [program_dir / "processed" / "findings", program_dir / "findings"]:
+            if not finding_parent.is_dir():
+                continue
+            for finding_dir in sorted(finding_parent.iterdir()):
+                if not finding_dir.is_dir():
+                    continue
+                ev_dir = finding_dir / "evidence"
+                if not ev_dir.is_dir():
+                    continue
+
+                # Try to match finding by title from description/report
+                finding_id = None
+                for desc_name in ["description.md", "report.md"]:
+                    desc_file = finding_dir / desc_name
+                    if desc_file.exists():
+                        content = desc_file.read_text(errors="replace")
+                        title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+                        if title_match:
+                            title = title_match.group(1).strip()
+                            finding = session.query(Finding).filter_by(
+                                program_id=program.id, title=title
+                            ).first()
+                            if finding:
+                                finding_id = finding.id
+                        break
+
+                evidence_paths.append((ev_dir, finding_id))
+
+        # Also evidence in reports/submissions/evidence/
+        sub_evidence = program_dir / "reports" / "submissions" / "evidence"
+        if sub_evidence.is_dir():
+            evidence_paths.append((sub_evidence, None))
+
+        # Process all evidence directories
+        for ev_dir, finding_id in evidence_paths:
+            for filepath in sorted(ev_dir.rglob("*")):
+                if not filepath.is_file():
+                    continue
+                # Skip very small or binary-only files
+                if filepath.stat().st_size == 0:
+                    continue
+
+                abs_path = str(filepath.resolve())
+
+                # Dedup by local_path
+                existing = session.query(EvidenceFile).filter_by(local_path=abs_path).first()
+                if existing:
+                    continue
+
+                session.add(EvidenceFile(
+                    finding_id=finding_id,
+                    local_path=abs_path,
+                    gcs_path="",
+                    filename=filepath.name,
+                    content_type=_guess_content_type(filepath),
+                    size_bytes=filepath.stat().st_size,
+                ))
+                imported += 1
+
+                if imported % 500 == 0:
+                    session.flush()
+
+    session.commit()
+    session.close()
+    print(f"  Cataloged {imported} evidence files")
+
+
 def import_submission_reports(base_dir: Path):
     """Import local submission report markdown files into submission_reports table."""
     outputs_dir = base_dir / "outputs"
@@ -611,25 +1165,40 @@ def run_full_import(base_dir: Path | None = None):
     print(f"Importing from {base_dir}")
     print()
 
-    print("[1/5] Importing submissions from report_latest.json...")
+    print("[1/12] Importing submissions from report_latest.json...")
     import_report_json(base_dir)
 
-    print("[2/5] Importing AI evaluations...")
+    print("[2/12] Importing AI evaluations...")
     import_ai_evaluations(base_dir)
 
-    print("[3/5] Importing hunt memory...")
+    print("[3/12] Importing hunt memory...")
     import_hunt_memory(base_dir)
 
-    print("[4/5] Scanning local findings...")
+    print("[4/12] Scanning local findings (processed/)...")
     import_local_findings(base_dir)
 
-    print("[5/5] Importing submission reports...")
+    print("[5/12] Enriching findings + importing top-level findings...")
+    enrich_findings(base_dir)
+
+    print("[6/12] Importing recon data...")
+    import_recon_data(base_dir)
+
+    print("[7/12] Deriving attack surface...")
+    import_attack_surface(base_dir)
+
+    print("[8/12] Importing activity logs...")
+    import_activity_logs(base_dir)
+
+    print("[9/12] Cataloging evidence files...")
+    import_evidence_metadata(base_dir)
+
+    print("[10/12] Importing submission reports...")
     import_submission_reports(base_dir)
 
-    print("[6/7] Deduplicating programs...")
+    print("[11/12] Deduplicating programs...")
     deduplicate_programs()
 
-    print("[7/7] Syncing report statuses from platform data...")
+    print("[12/12] Syncing report statuses from platform data...")
     sync_report_statuses()
 
     print()

@@ -78,6 +78,14 @@ def create_engagement(program_id: int, **kwargs) -> int:
         return eng.id
 
 
+def get_engagement_by_program(program_id: int) -> Engagement | None:
+    with get_session() as s:
+        return s.scalar(
+            select(Engagement).where(Engagement.program_id == program_id)
+            .order_by(Engagement.started_at.desc())
+        )
+
+
 def update_engagement(engagement_id: int, **kwargs) -> None:
     with get_session() as s:
         eng = s.get(Engagement, engagement_id)
@@ -269,6 +277,46 @@ def update_sync_state(source: str, last_submission_updated: datetime) -> None:
         )
         s.execute(stmt)
         s.commit()
+
+
+# ── Evidence Files ───────────────────────────────────────────
+def get_finding_evidence(finding_id: int) -> list[EvidenceFile]:
+    with get_session() as s:
+        return list(s.scalars(
+            select(EvidenceFile).where(EvidenceFile.finding_id == finding_id)
+            .order_by(EvidenceFile.filename)
+        ).all())
+
+
+def save_evidence_file(*, finding_id: int | None = None, report_id: int | None = None,
+                       filename: str, local_path: str = "", gcs_path: str = "",
+                       content_type: str = "", size_bytes: int = 0) -> int:
+    with get_session() as s:
+        ef = EvidenceFile(
+            finding_id=finding_id, report_id=report_id, filename=filename,
+            local_path=local_path, gcs_path=gcs_path,
+            content_type=content_type, size_bytes=size_bytes,
+        )
+        s.add(ef)
+        s.commit()
+        return ef.id
+
+
+def bulk_log_activity(engagement_id: int, entries: list[dict]) -> int:
+    with get_session() as s:
+        count = 0
+        for entry in entries:
+            s.add(ActivityLog(
+                engagement_id=engagement_id,
+                action=entry.get("action", "unknown"),
+                details=entry.get("details", {}),
+                created_at=entry.get("created_at", _utcnow()),
+            ))
+            count += 1
+            if count % 500 == 0:
+                s.flush()
+        s.commit()
+        return count
 
 
 # ── Stats ────────────────────────────────────────────────────

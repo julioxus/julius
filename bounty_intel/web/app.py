@@ -330,6 +330,11 @@ async def program_detail(request: Request, program_id: int):
     building_blocks = [f for f in findings if f.is_building_block]
     activity = service.get_activity(limit=50)  # TODO: filter by engagement
 
+    # Recon & attack surface from engagement
+    engagement = service.get_engagement_by_program(program_id)
+    recon_data = engagement.recon_data if engagement else {}
+    attack_surface = engagement.attack_surface if engagement else {}
+
     session.close()
 
     return _render(request, "program_detail.html", {
@@ -340,6 +345,8 @@ async def program_detail(request: Request, program_id: int):
         "reports": reports,
         "submissions": submissions,
         "activity": activity,
+        "recon_data": recon_data or {},
+        "attack_surface": attack_surface or {},
         "badge_class": _badge_class,
         "severity_badge": _severity_badge,
         "status_badge": _status_badge,
@@ -374,6 +381,7 @@ async def finding_detail(request: Request, finding_id: int):
     rendered_desc = _safe_markdown(finding.description)
     rendered_steps = _safe_markdown(finding.steps_to_reproduce)
     rendered_impact = _safe_markdown(finding.impact)
+    evidence_files = service.get_finding_evidence(finding_id)
     session.close()
 
     return _render(request, "finding_detail.html", {
@@ -383,10 +391,52 @@ async def finding_detail(request: Request, finding_id: int):
         "rendered_desc": rendered_desc,
         "rendered_steps": rendered_steps,
         "rendered_impact": rendered_impact,
+        "evidence_files": evidence_files,
         "severity_badge": _severity_badge,
         "status_badge": _status_badge,
         "days_ago": _days_ago,
     })
+
+
+@app.get("/evidence/{evidence_id}/preview", response_class=HTMLResponse)
+async def evidence_preview(request: Request, evidence_id: int):
+    """Return text content of a local evidence file as an HTML fragment (HTMX)."""
+    from bounty_intel.db import EvidenceFile, get_session
+
+    session = get_session()
+    ef = session.get(EvidenceFile, evidence_id)
+    if not ef:
+        session.close()
+        return HTMLResponse("<em class='muted'>Not found</em>", status_code=404)
+
+    local_path = ef.local_path or ""
+    content_type = ef.content_type or ""
+    session.close()
+
+    # Only serve text-based previews
+    if not content_type.startswith("text/") and content_type not in (
+        "application/json", "application/xml", "application/yaml",
+    ):
+        return HTMLResponse("<em class='muted'>Binary file — preview not available</em>")
+
+    if not local_path:
+        return HTMLResponse("<em class='muted'>No local file path</em>")
+
+    try:
+        p = Path(local_path)
+        if not p.exists():
+            return HTMLResponse("<em class='muted'>File not found on disk</em>")
+        content = p.read_text(errors="replace")[:100_000]
+        # Escape HTML
+        import html as html_mod
+        escaped = html_mod.escape(content)
+        return HTMLResponse(
+            f'<pre style="max-height:400px;overflow:auto;background:var(--surface);'
+            f'padding:0.8rem;border-radius:6px;font-size:0.8rem;white-space:pre-wrap">'
+            f'{escaped}</pre>'
+        )
+    except Exception:
+        return HTMLResponse("<em class='muted'>Error reading file</em>")
 
 
 # ──────────────────────────────────────────────────────────────

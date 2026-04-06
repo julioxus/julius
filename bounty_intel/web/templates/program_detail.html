@@ -55,11 +55,14 @@
 {% endif %}
 
 <!-- Tabs -->
+{% set recon_count = (recon_data.subdomains|default([])|length) + (recon_data.endpoints|default([])|length) + (recon_data.api_specs|default([])|length) + (recon_data.live_hosts|default([])|length) + (recon_data.summaries|default([])|length) + (recon_data.other|default([])|length) %}
 <div class="tabs">
   <a class="tab active" onclick="showTab('findings',this)">Findings ({{ findings|length }})</a>
   <a class="tab" onclick="showTab('blocks',this)">Building Blocks ({{ building_blocks|length }})</a>
   <a class="tab" onclick="showTab('reports',this)">Reports ({{ reports|length }})</a>
   <a class="tab" onclick="showTab('submissions',this)">Submissions ({{ submissions|length }})</a>
+  <a class="tab" onclick="showTab('recon',this)">Recon ({{ recon_count }})</a>
+  <a class="tab" onclick="showTab('surface',this)">Attack Surface</a>
 </div>
 
 <!-- Findings Tab -->
@@ -145,6 +148,108 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
+
+<!-- Recon Tab -->
+<div id="tab-recon" class="tab-content" style="display:none">
+{% if recon_count > 0 %}
+  {% set categories = [('subdomains', 'Subdomains'), ('endpoints', 'Endpoints'), ('api_specs', 'API Specs'), ('live_hosts', 'Live Hosts'), ('summaries', 'Summaries'), ('other', 'Other')] %}
+  {% for cat_key, cat_label in categories %}
+    {% set items = recon_data.get(cat_key, []) if recon_data else [] %}
+    {% if items %}
+    <div class="card" style="margin-bottom:1rem">
+      <h3 style="margin:0 0 0.5rem;display:flex;align-items:center;gap:0.5rem;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+        {{ cat_label }} <span class="badge badge-blue">{{ items|length }} files</span>
+        <span class="muted" style="font-size:0.8rem">click to expand</span>
+      </h3>
+      <div style="display:none">
+        {% for item in items %}
+        <div style="margin-bottom:1rem;border-left:2px solid var(--border);padding-left:0.8rem">
+          <div class="mono muted" style="font-size:0.75rem;margin-bottom:0.3rem">{{ item.filename }}</div>
+          {% if item.lines is defined and item.lines %}
+            <div style="font-size:0.8rem;color:var(--muted)">{{ item.total_lines|default(item.lines|length) }} entries</div>
+            <pre style="max-height:200px;overflow:auto;background:var(--surface);padding:0.5rem;border-radius:4px;font-size:0.75rem;margin:0.3rem 0">{% for line in item.lines[:50] %}{{ line }}
+{% endfor %}{% if item.lines|length > 50 %}... ({{ item.lines|length - 50 }} more){% endif %}</pre>
+          {% elif item.content %}
+            <pre style="max-height:200px;overflow:auto;background:var(--surface);padding:0.5rem;border-radius:4px;font-size:0.75rem;margin:0.3rem 0;white-space:pre-wrap">{{ item.content[:3000] }}{% if item.content|length > 3000 %}...{% endif %}</pre>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  {% endfor %}
+{% else %}
+<div class="insight-box">No recon data imported for this program.</div>
+{% endif %}
+</div>
+
+<!-- Attack Surface Tab -->
+<div id="tab-surface" class="tab-content" style="display:none">
+{% if attack_surface %}
+  <div class="grid" style="margin-bottom:1.5rem">
+    <div class="card" style="text-align:center">
+      <div style="font-size:2rem;font-weight:700;color:var(--accent)">{{ attack_surface.get('domain_count', attack_surface.get('domains', [])|length) }}</div>
+      <div class="muted">Domains in Scope</div>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="font-size:2rem;font-weight:700;color:var(--accent)">{{ attack_surface.get('subdomain_count', 0) }}</div>
+      <div class="muted">Subdomains Found</div>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="font-size:2rem;font-weight:700;color:var(--accent)">{{ attack_surface.get('endpoint_count', 0) }}</div>
+      <div class="muted">Endpoints Mapped</div>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="font-size:2rem;font-weight:700;color:var(--accent)">{{ attack_surface.get('live_host_count', 0) }}</div>
+      <div class="muted">Live Hosts</div>
+    </div>
+  </div>
+
+  {% set coverage = attack_surface.get('coverage', {}) %}
+  {% if coverage %}
+  <div class="card" style="margin-bottom:1rem">
+    <h3 style="margin:0 0 0.5rem">Coverage Checklist</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0.5rem">
+      {% for check, label in [('subdomains_enumerated', 'Subdomains Enumerated'), ('endpoints_mapped', 'Endpoints Mapped'), ('api_specs_found', 'API Specs Found'), ('live_hosts_scanned', 'Live Hosts Scanned')] %}
+      <div style="display:flex;align-items:center;gap:0.4rem">
+        {% if coverage.get(check) %}<span style="color:var(--green)">&#10003;</span>{% else %}<span style="color:var(--muted)">&#10007;</span>{% endif %}
+        <span>{{ label }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if attack_surface.get('domains') %}
+  <div class="card" style="margin-bottom:1rem">
+    <h3 style="margin:0 0 0.5rem">Scope Domains</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:0.3rem">
+      {% for d in attack_surface.domains %}
+      <span class="badge badge-gray">{{ d }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if attack_surface.get('assessment_summary') %}
+  <div class="card" style="margin-bottom:1rem">
+    <h3 style="margin:0 0 0.5rem">Assessment Summary</h3>
+    <pre style="max-height:300px;overflow:auto;background:var(--surface);padding:0.8rem;border-radius:6px;font-size:0.8rem;white-space:pre-wrap">{{ attack_surface.assessment_summary }}</pre>
+  </div>
+  {% endif %}
+
+  {% if attack_surface.get('program_notes') %}
+  <div class="card" style="margin-bottom:1rem">
+    <h3 style="margin:0 0 0.5rem;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+      Program Notes <span class="muted" style="font-size:0.8rem">click to expand</span>
+    </h3>
+    <pre style="display:none;max-height:400px;overflow:auto;background:var(--surface);padding:0.8rem;border-radius:6px;font-size:0.8rem;white-space:pre-wrap">{{ attack_surface.program_notes }}</pre>
+  </div>
+  {% endif %}
+{% else %}
+<div class="insight-box">No attack surface data available.</div>
+{% endif %}
 </div>
 
 {% endblock %}

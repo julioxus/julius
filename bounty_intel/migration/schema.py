@@ -18,6 +18,13 @@ def _add_missing_columns():
         conn.execute(text(
             "ALTER TABLE programs ADD COLUMN IF NOT EXISTS logo_url TEXT DEFAULT ''"
         ))
+        # local_path on evidence_files + relax gcs_path (added 2026-04-06)
+        conn.execute(text(
+            "ALTER TABLE evidence_files ADD COLUMN IF NOT EXISTS local_path TEXT DEFAULT ''"
+        ))
+        conn.execute(text(
+            "ALTER TABLE evidence_files ALTER COLUMN gcs_path DROP NOT NULL"
+        ))
         conn.commit()
 
 
