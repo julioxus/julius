@@ -397,54 +397,131 @@ async def submit_report(request: Request, report_id: int):
 
 
 # ──────────────────────────────────────────────────────────────
-# 4.6 — Submissions Tracker
+# 4.6 — Submissions Tracker (enriched with AI evaluations + forecast)
 # ──────────────────────────────────────────────────────────────
 @app.get("/submissions", response_class=HTMLResponse)
-async def submissions_list(request: Request, disposition: str = "", platform: str = ""):
+async def submissions_list(request: Request):
+    from bounty_intel.forecast.engine import compute_forecast
     from bounty_intel import service
+    from bounty_intel.db import AIEvaluation, Submission, get_session
+    from sqlalchemy import select
 
-    
-    submissions = service.get_submissions(
-        platform=platform or None,
-        disposition=disposition or None,
-    )
+    fc = compute_forecast()
+    ranked = fc.get("ranked_submissions", [])
+    ranked_by_id = {str(s["id"]): s for s in ranked}
+
+    session = get_session()
+    all_subs = service.get_submissions()
+
+    # Split into pending (with forecast data) and closed (with outcome analysis)
+    pending = []
+    closed_paid = []
+    closed_rejected = []
+
+    for sub in all_subs:
+        forecast_data = ranked_by_id.get(sub.platform_id, {})
+        ai_eval = session.scalar(select(AIEvaluation).where(AIEvaluation.submission_id == sub.id))
+
+        entry = {
+            "sub": sub,
+            "ev": forecast_data.get("expected_value_eur", 0),
+            "prob": forecast_data.get("acceptance_prob", 0),
+            "prob_source": forecast_data.get("prob_source", ""),
+            "est_resolve": forecast_data.get("est_resolve_date", ""),
+            "overdue": forecast_data.get("est_overdue", False),
+            "ai_reasoning": ai_eval.triager_reasoning if ai_eval else "",
+            "ai_strengths": ai_eval.strengths if ai_eval else [],
+            "ai_weaknesses": ai_eval.weaknesses if ai_eval else [],
+            "ai_outcome": ai_eval.likely_outcome if ai_eval else "",
+        }
+
+        if sub.disposition in ("new", "triaged", "needs_more_info", "accepted"):
+            pending.append(entry)
+        elif sub.disposition == "resolved":
+            closed_paid.append(entry)
+        else:
+            closed_rejected.append(entry)
+
+    pending.sort(key=lambda x: x["ev"], reverse=True)
+    session.close()
 
     return _render(request, "submissions.html", {
         "active_page": "submissions",
-        "submissions": submissions,
+        "pending": pending,
+        "closed_paid": closed_paid,
+        "closed_rejected": closed_rejected,
+        "total": len(all_subs),
+        "total_pending_ev": sum(e["ev"] for e in pending),
         "badge_class": _badge_class,
         "severity_badge": _severity_badge,
         "days_ago": _days_ago,
-        "filter_disposition": disposition,
-        "filter_platform": platform,
     })
 
 
 # ──────────────────────────────────────────────────────────────
-# 4.7 — Hunt Intelligence
+# 4.7 — Hunt Intelligence (techniques + patterns + lessons)
 # ──────────────────────────────────────────────────────────────
 @app.get("/hunt", response_class=HTMLResponse)
 async def hunt_intel(request: Request):
     from bounty_intel import service
+    from bounty_intel.db import Finding, Submission, get_session
+    from sqlalchemy import func, select
 
-    
-    entries = service.get_hunt_memory()
+    session = get_session()
+    hunt_entries = service.get_hunt_memory()
 
-    # Aggregate stats
-    stats_by_class: dict[str, dict] = {}
-    for e in entries:
+    # Aggregate by tech_stack → what vulns work
+    tech_vulns: dict[str, list] = {}
+    for e in hunt_entries:
+        for tech in (e.tech_stack or []):
+            if tech not in tech_vulns:
+                tech_vulns[tech] = []
+            tech_vulns[tech].append({
+                "vuln_class": e.vuln_class, "success": e.success,
+                "technique": e.technique_summary, "target": e.target,
+                "payout": float(e.payout or 0),
+            })
+
+    # Aggregate by vuln_class
+    vuln_stats: dict[str, dict] = {}
+    for e in hunt_entries:
         vc = e.vuln_class
-        if vc not in stats_by_class:
-            stats_by_class[vc] = {"total": 0, "success": 0, "total_payout": 0}
-        stats_by_class[vc]["total"] += 1
+        if vc not in vuln_stats:
+            vuln_stats[vc] = {"total": 0, "success": 0, "payout": 0, "techniques": [], "targets": []}
+        vuln_stats[vc]["total"] += 1
         if e.success:
-            stats_by_class[vc]["success"] += 1
-        stats_by_class[vc]["total_payout"] += float(e.payout or 0)
+            vuln_stats[vc]["success"] += 1
+        vuln_stats[vc]["payout"] += float(e.payout or 0)
+        if e.technique_summary and e.technique_summary not in vuln_stats[vc]["techniques"]:
+            vuln_stats[vc]["techniques"].append(e.technique_summary)
+        if e.target not in vuln_stats[vc]["targets"]:
+            vuln_stats[vc]["targets"].append(e.target)
+
+    # Lessons from rejections: what disposition + severity combos fail most
+    rejection_patterns = session.execute(
+        select(Submission.disposition, Submission.severity, func.count().label("cnt"))
+        .where(Submission.disposition.in_(["duplicate", "informative", "not_applicable"]))
+        .group_by(Submission.disposition, Submission.severity)
+        .order_by(func.count().desc())
+    ).all()
+
+    # Success patterns: what severity + platform combos get paid
+    success_patterns = session.execute(
+        select(Submission.platform, Submission.severity, func.count().label("cnt"))
+        .where(Submission.disposition == "resolved")
+        .group_by(Submission.platform, Submission.severity)
+        .order_by(func.count().desc())
+    ).all()
+
+    session.close()
 
     return _render(request, "hunt.html", {
         "active_page": "hunt",
-        "entries": entries,
-        "stats_by_class": stats_by_class,
+        "hunt_entries": hunt_entries,
+        "tech_vulns": tech_vulns,
+        "vuln_stats": vuln_stats,
+        "rejection_patterns": rejection_patterns,
+        "success_patterns": success_patterns,
     })
 
 
@@ -471,27 +548,90 @@ async def activity_feed(request: Request):
 @app.get("/recommendations", response_class=HTMLResponse)
 async def recommendations(request: Request):
     from bounty_intel.forecast.engine import compute_forecast
+    from bounty_intel import service
+    from bounty_intel.db import Finding, Submission, get_session
+    from sqlalchemy import func, select
 
     fc = compute_forecast()
     ranked = fc.get("ranked_submissions", [])
+    session = get_session()
 
-    # Group by program and compute ROI per program
-    program_ev: dict[str, dict] = {}
+    # Per-program analysis with context
+    program_analysis: dict[str, dict] = {}
     for s in ranked:
         prog = s["program"]
-        if prog not in program_ev:
-            program_ev[prog] = {"total_ev": 0, "count": 0, "top_ev": 0, "platform": s.get("platform", "")}
-        program_ev[prog]["total_ev"] += s["expected_value_eur"]
-        program_ev[prog]["count"] += 1
-        program_ev[prog]["top_ev"] = max(program_ev[prog]["top_ev"], s["expected_value_eur"])
+        if prog not in program_analysis:
+            program_analysis[prog] = {
+                "total_ev": 0, "count": 0, "top_submission": None,
+                "platform": s.get("platform", ""), "severities": [],
+                "ai_strengths": [], "ai_weaknesses": [],
+            }
+        pa = program_analysis[prog]
+        pa["total_ev"] += s["expected_value_eur"]
+        pa["count"] += 1
+        pa["severities"].append(s["severity"])
+        if pa["top_submission"] is None or s["expected_value_eur"] > pa["top_submission"]["expected_value_eur"]:
+            pa["top_submission"] = s
+        if s.get("strengths"):
+            pa["ai_strengths"].extend(s["strengths"][:2])
+        if s.get("weaknesses"):
+            pa["ai_weaknesses"].extend(s["weaknesses"][:2])
 
-    sorted_programs = sorted(program_ev.items(), key=lambda x: x[1]["total_ev"], reverse=True)
+    # Enrich with historical data: paid vs rejected per program
+    for prog_name, pa in program_analysis.items():
+        # Find the program in DB
+        programs = service.list_programs()
+        matching = [p for p in programs if p.company_name == prog_name]
+        if matching:
+            pid = matching[0].id
+            paid = session.scalar(select(func.count(Submission.id)).where(
+                Submission.program_id == pid, Submission.disposition == "resolved")) or 0
+            rejected = session.scalar(select(func.count(Submission.id)).where(
+                Submission.program_id == pid, Submission.disposition.in_(["duplicate", "informative", "not_applicable"]))) or 0
+            total_findings = session.scalar(select(func.count(Finding.id)).where(Finding.program_id == pid)) or 0
+            building_blocks = session.scalar(select(func.count(Finding.id)).where(
+                Finding.program_id == pid, Finding.is_building_block.is_(True))) or 0
+            pa["paid"] = paid
+            pa["rejected"] = rejected
+            pa["total_findings"] = total_findings
+            pa["building_blocks"] = building_blocks
+            pa["acceptance_rate"] = paid / (paid + rejected) if (paid + rejected) > 0 else None
+
+    # Sort by total EV
+    sorted_programs = sorted(program_analysis.items(), key=lambda x: x[1]["total_ev"], reverse=True)
+
+    # Programs with unexploited building blocks (chain opportunities)
+    chain_opportunities = []
+    bbs = session.scalars(select(Finding).where(Finding.is_building_block.is_(True))).all()
+    for bb in bbs:
+        if bb.building_block_notes:
+            chain_opportunities.append({
+                "program": bb.program.company_name if bb.program else "?",
+                "title": bb.title,
+                "notes": bb.building_block_notes,
+                "severity": bb.severity,
+            })
+
+    # Rejection lessons: most common rejection reasons
+    top_rejections = session.execute(
+        select(Submission.disposition, func.count().label("cnt"))
+        .where(Submission.disposition.in_(["duplicate", "informative", "not_applicable", "wont_fix"]))
+        .group_by(Submission.disposition)
+        .order_by(func.count().desc())
+    ).all()
+
+    session.close()
 
     return _render(request, "recommendations.html", {
         "active_page": "recommendations",
-        "ranked": ranked[:20],
         "program_ranking": sorted_programs,
+        "chain_opportunities": chain_opportunities,
+        "top_rejections": top_rejections,
+        "confirmed_eur": fc.get("confirmed_earnings_eur", 0),
+        "expected_eur": fc.get("scenarios", {}).get("expected", {}).get("total_eur", 0),
+        "acceptance_rate": fc.get("historical_acceptance_rate", 0),
         "severity_badge": _severity_badge,
+        "badge_class": _badge_class,
     })
 
 

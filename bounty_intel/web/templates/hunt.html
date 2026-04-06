@@ -3,40 +3,90 @@
 {% block content %}
 <div class="page-header"><h1>Hunt Intelligence</h1></div>
 
-{% if stats_by_class %}
-<h2>Success Rate by Vulnerability Class</h2>
+<!-- Rejection patterns: what NOT to do -->
+{% if rejection_patterns %}
+<h2>Rejection Patterns — Avoid These</h2>
+<div class="insight-box bad">
+  <strong>Most common rejection reasons:</strong>
+  {% for r in rejection_patterns %}
+  <span class="badge {{ badge_class(r.disposition) }}" style="margin-right:0.3rem">{{ r.disposition }}: {{ r.cnt }}x</span>
+  {% if r.severity %}<span class="muted">({{ r.severity }})</span>{% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Success patterns: what DOES work -->
+{% if success_patterns %}
+<h2>Success Patterns — What Gets Paid</h2>
+<div class="insight-box good">
+  <strong>Paid submissions by severity:</strong>
+  {% for r in success_patterns %}
+  <span class="badge badge-green" style="margin-right:0.3rem">{{ r.platform }} {{ r.severity }}: {{ r.cnt }}x</span>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Techniques by vulnerability class -->
+{% if vuln_stats %}
+<h2>Techniques by Vulnerability Class</h2>
+{% for vc, stats in vuln_stats.items() %}
+<div class="card" style="margin-bottom:1rem">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+    <div>
+      <strong style="font-size:1.1rem">{{ vc }}</strong>
+      <span class="badge {% if stats.success > 0 and stats.success / stats.total > 0.5 %}badge-green{% elif stats.total > 0 %}badge-yellow{% else %}badge-gray{% endif %}" style="margin-left:0.5rem">
+        {{ stats.success }}/{{ stats.total }} success ({{ "%.0f"|format(stats.success / stats.total * 100) if stats.total > 0 else 0 }}%)
+      </span>
+    </div>
+    {% if stats.payout > 0 %}<span class="mono green">&euro;{{ "%.0f"|format(stats.payout) }} earned</span>{% endif %}
+  </div>
+  {% if stats.techniques %}
+  <div style="margin-bottom:0.5rem">
+    <div class="muted" style="font-size:0.8rem;margin-bottom:0.2rem">TECHNIQUES THAT WORKED</div>
+    {% for t in stats.techniques %}
+    <div style="font-size:0.9rem;padding:0.2rem 0">{{ t }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="muted" style="font-size:0.8rem">Targets tested: {{ stats.targets|join(', ') }}</div>
+</div>
+{% endfor %}
+{% endif %}
+
+<!-- Tech stack → vulnerability mapping -->
+{% if tech_vulns %}
+<h2>Tech Stack Attack Map</h2>
+<p class="muted" style="margin-bottom:1rem">What vulnerabilities work on which technologies (based on your past testing)</p>
 <table>
-  <thead><tr><th>Vuln Class</th><th>Attempts</th><th>Successes</th><th>Rate</th><th>Total Payout</th></tr></thead>
+  <thead><tr><th>Technology</th><th>Vulnerabilities Found</th><th>Success Rate</th></tr></thead>
   <tbody>
-    {% for vc, s in stats_by_class.items() %}
+    {% for tech, vulns in tech_vulns.items() %}
     <tr>
-      <td><strong>{{ vc }}</strong></td>
-      <td class="mono">{{ s.total }}</td>
-      <td class="mono green">{{ s.success }}</td>
-      <td class="mono {% if s.total > 0 and s.success / s.total > 0.5 %}green{% elif s.total > 0 and s.success / s.total > 0.2 %}yellow{% else %}red{% endif %}">
-        {% if s.total > 0 %}{{ "%.0f"|format(s.success / s.total * 100) }}%{% else %}-{% endif %}
+      <td><strong>{{ tech }}</strong></td>
+      <td>
+        {% set success_vulns = [] %}
+        {% for v in vulns %}
+          {% if v.success %}
+          <span class="badge badge-green">{{ v.vuln_class }}</span>
+          {% else %}
+          <span class="badge badge-red">{{ v.vuln_class }}</span>
+          {% endif %}
+        {% endfor %}
       </td>
-      <td class="mono">&euro;{{ "%.0f"|format(s.total_payout) }}</td>
+      <td class="mono">
+        {% set successes = vulns|selectattr('success')|list|length %}
+        {{ "%.0f"|format(successes / vulns|length * 100) if vulns|length > 0 else 0 }}%
+      </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
 {% endif %}
 
-<h2>All Entries</h2>
-<table>
-  <thead><tr><th>Target</th><th>Class</th><th>Tech Stack</th><th>Result</th><th>Payout</th><th>Technique</th></tr></thead>
-  <tbody>
-    {% for e in entries %}
-    <tr>
-      <td>{{ e.target }}</td>
-      <td><span class="badge badge-gray">{{ e.vuln_class }}</span></td>
-      <td class="muted">{{ e.tech_stack|join(', ') if e.tech_stack else '-' }}</td>
-      <td>{% if e.success %}<span class="badge badge-green">success</span>{% else %}<span class="badge badge-red">fail</span>{% endif %}</td>
-      <td class="mono">&euro;{{ e.payout }}</td>
-      <td class="muted">{{ e.technique_summary[:60] if e.technique_summary else '-' }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+{% if not hunt_entries %}
+<div class="insight-box">
+  No hunt intelligence data yet. As you test programs, techniques and outcomes are recorded here via <code>api.record_hunt()</code>.
+</div>
+{% endif %}
+
 {% endblock %}
