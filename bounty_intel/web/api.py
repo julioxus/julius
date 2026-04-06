@@ -624,10 +624,11 @@ async def update_evidence_gcs(evidence_id: int, data: dict):
     if not ef:
         session.close()
         raise HTTPException(404, "Evidence not found")
-    ef.gcs_path = data.get("gcs_path", "")
+    new_gcs_path = data.get("gcs_path", "")
+    ef.gcs_path = new_gcs_path
     session.commit()
     session.close()
-    return {"id": evidence_id, "gcs_path": ef.gcs_path}
+    return {"id": evidence_id, "gcs_path": new_gcs_path}
 
 
 # ── Payouts ─────────────────────────────────────────────────
