@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ report.report_slug }} - Bounty Intel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ report.report_slug }}</h1>
+  <div class="actions">
+    <span class="badge {{ severity_badge(report.severity or '') }}">{{ report.severity }}</span>
+    <span class="badge {{ status_badge(report.status) }}">{{ report.status }}</span>
+    <span class="badge badge-{% if report.platform == 'hackerone' %}blue{% else %}purple{% endif %}">{{ report.platform }}</span>
+
+    {% if report.status == 'draft' %}
+    <form method="post" action="/reports/{{ report.id }}/promote" style="display:inline">
+      <input type="hidden" name="status" value="ready">
+      <button class="btn btn-primary btn-sm" type="submit">Mark Ready</button>
+    </form>
+    {% elif report.status == 'ready' %}
+    <form method="post" action="/reports/{{ report.id }}/submit" style="display:inline">
+      <input type="text" name="platform_submission_id" placeholder="Platform ID after submit" class="filter-select" style="width:200px">
+      <button class="btn btn-primary btn-sm" type="submit">Approve & Submit</button>
+    </form>
+    {% endif %}
+
+    {% if report.status not in ('submitted', 'accepted') %}
+    <form method="post" action="/reports/{{ report.id }}/promote" style="display:inline">
+      <input type="hidden" name="status" value="draft">
+      <button class="btn btn-danger btn-sm" type="submit">Back to Draft</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if report.platform_submission_id %}
+<div class="insight-box good">
+  Submitted as <strong>{{ report.platform_submission_id }}</strong> on {{ report.submitted_at.strftime('%Y-%m-%d %H:%M') if report.submitted_at else '?' }}
+</div>
+{% endif %}
+
+{% if report.validation_result %}
+<div class="insight-box {% if report.validation_result.get('passed') %}good{% else %}warn{% endif %}">
+  <strong>Validation:</strong> {{ report.validation_result | tojson }}
+</div>
+{% endif %}
+
+<div class="split-pane">
+  <div>
+    <textarea
+      id="editor"
+      hx-put="/reports/{{ report.id }}"
+      hx-target="#preview"
+      hx-trigger="keyup changed delay:500ms"
+      hx-include="this"
+      name="markdown_body"
+    >{{ report.markdown_body }}</textarea>
+  </div>
+  <div class="preview-pane" id="preview">
+    {{ rendered_html | safe }}
+  </div>
+</div>
+
+{% if evidence %}
+<h2 style="margin-top:1.5rem">Evidence</h2>
+<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
+  {% for ef in evidence %}
+  <a href="/evidence/{{ ef.id }}" target="_blank" class="card" style="text-align:center;text-decoration:none">
+    <div class="muted">{{ ef.filename }}</div>
+    <div style="font-size:0.75rem;color:var(--muted)">{{ ef.content_type }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

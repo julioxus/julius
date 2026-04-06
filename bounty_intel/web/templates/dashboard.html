@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Bounty Intel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Earnings Dashboard</h1>
+  <div class="actions">
+    <button class="btn btn-primary" hx-post="/sync" hx-swap="innerHTML" hx-target="#sync-status" hx-indicator="#sync-spinner">
+      Sync Now <span id="sync-spinner" class="htmx-indicator"><span class="spinner"></span></span>
+    </button>
+    <span id="sync-status"></span>
+  </div>
+</div>
+
+<!-- KPI Cards -->
+<div class="grid">
+  <div class="card">
+    <div class="card-value green mono">&euro;{{ "%.0f"|format(fc.confirmed_earnings_eur) }}</div>
+    <div class="card-label">Confirmed Earnings</div>
+  </div>
+  <div class="card">
+    <div class="card-value accent mono">&euro;{{ "%.0f"|format(fc.scenarios.expected.total_eur) }}</div>
+    <div class="card-label">Expected Total (EV)</div>
+  </div>
+  <div class="card">
+    <div class="card-value {% if fc.historical_acceptance_rate and fc.historical_acceptance_rate > 0.2 %}green{% elif fc.historical_acceptance_rate %}yellow{% else %}muted{% endif %} mono">
+      {% if fc.historical_acceptance_rate %}{{ "%.0f"|format(fc.historical_acceptance_rate * 100) }}%{% else %}N/A{% endif %}
+    </div>
+    <div class="card-label">Acceptance Rate</div>
+  </div>
+  <div class="card">
+    <div class="card-value blue mono">{{ fc.pending_count }}</div>
+    <div class="card-label">Pending Submissions</div>
+  </div>
+</div>
+
+<!-- Scenarios -->
+<h2>Forecast Scenarios</h2>
+<table class="scenario-table">
+  <thead>
+    <tr><th>Scenario</th><th>Additional</th><th>Total</th></tr>
+  </thead>
+  <tbody>
+    {% for name, sc in fc.scenarios.items() %}
+    <tr>
+      <td>
+        <strong>{{ name|capitalize }}</strong>
+        <br><span class="muted" style="font-size:0.8rem">{{ sc.description }}</span>
+      </td>
+      <td class="mono">&euro;{{ "%.0f"|format(sc.additional_eur) }}</td>
+      <td class="mono {% if name == 'expected' %}accent{% elif name == 'optimistic' %}green{% endif %}" style="font-weight:600">
+        &euro;{{ "%.0f"|format(sc.total_eur) }}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<!-- Monthly Breakdown -->
+<h2>Monthly Breakdown</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Month</th><th>Confirmed</th><th>Pending EV</th><th>Total</th>
+      <th>Submitted</th><th>Paid</th><th>Rejected</th><th>Rate</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for m in fc.monthly_breakdown %}
+    <tr {% if m.type == 'current' %}style="background:rgba(99,102,241,0.06)"{% endif %}>
+      <td>
+        {{ m.label }}
+        {% if m.type == 'current' %}<span class="badge badge-blue">current</span>{% endif %}
+        {% if m.type == 'future' %}<span class="badge badge-gray">projected</span>{% endif %}
+      </td>
+      <td class="mono green">&euro;{{ "%.0f"|format(m.confirmed_eur) }}</td>
+      <td class="mono accent">&euro;{{ "%.0f"|format(m.pending_ev_eur) }}</td>
+      <td class="mono" style="font-weight:600">&euro;{{ "%.0f"|format(m.total_eur) }}</td>
+      <td class="mono">{{ m.submitted }}</td>
+      <td class="mono green">{{ m.paid }}</td>
+      <td class="mono red">{{ m.rejected }}</td>
+      <td class="mono">{% if m.acceptance_rate is not none %}{{ "%.0f"|format(m.acceptance_rate * 100) }}%{% else %}-{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<!-- Ranked Submissions -->
+<h2>Top Pending Submissions (by EV)</h2>
+<table>
+  <thead>
+    <tr><th>#</th><th>Prob</th><th>EV</th><th>Potential</th><th>Program</th><th>Title</th><th>Source</th></tr>
+  </thead>
+  <tbody>
+    {% for s in fc.ranked_submissions[:20] %}
+    <tr class="expandable">
+      <td>{{ loop.index }}</td>
+      <td class="mono">{{ "%.0f"|format(s.acceptance_prob * 100) }}%</td>
+      <td class="mono accent">&euro;{{ "%.0f"|format(s.expected_value_eur) }}</td>
+      <td class="mono">&euro;{{ "%.0f"|format(s.expected_bounty_eur) }}</td>
+      <td>{{ s.program[:20] }}</td>
+      <td>{{ s.title[:45] }}{% if s.title|length > 45 %}...{% endif %}</td>
+      <td>
+        <span class="badge {% if s.prob_source == 'ai' %}badge-purple{% else %}badge-gray{% endif %}">{{ s.prob_source }}</span>
+        <span class="badge {{ severity_badge(s.severity) }}">{{ s.severity }}</span>
+      </td>
+    </tr>
+    <tr class="detail-row">
+      <td colspan="7">
+        <div class="detail-panel">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+            <div>
+              <div class="muted" style="font-size:0.8rem;margin-bottom:0.3rem">DETAILS</div>
+              <div>Platform: <strong>{{ s.platform }}</strong></div>
+              <div>Disposition: <span class="badge {{ badge_class(s.disposition) }}">{{ s.disposition }}</span></div>
+              <div>Listed: {{ s.listed_currency }} {{ "%.0f"|format(s.listed_bounty) }}</div>
+              <div>Submitted: {{ days_ago(s.created_at) }}</div>
+              <div>Est. resolve: {{ s.est_resolve_date }}{% if s.est_overdue %} <span class="badge badge-red">overdue</span>{% endif %}</div>
+            </div>
+            {% if s.triager_reasoning %}
+            <div>
+              <div class="muted" style="font-size:0.8rem;margin-bottom:0.3rem">AI TRIAGER</div>
+              <div style="font-style:italic;margin-bottom:0.5rem">{{ s.triager_reasoning }}</div>
+              {% if s.strengths %}
+              <div class="green" style="font-size:0.85rem">+ {{ s.strengths|join(' + ') }}</div>
+              {% endif %}
+              {% if s.weaknesses %}
+              <div class="red" style="font-size:0.85rem">- {{ s.weaknesses|join(' - ') }}</div>
+              {% endif %}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if fc.payout_conversions %}
+<h2>Payout History</h2>
+<table>
+  <thead><tr><th>Program</th><th>Amount (EUR)</th><th>Details</th></tr></thead>
+  <tbody>
+    {% for pc in fc.payout_conversions %}
+    <tr>
+      <td>{{ pc.program }}</td>
+      <td class="mono green">&euro;{{ "%.2f"|format(pc.eur_amount) }}</td>
+      <td class="muted" style="font-size:0.8rem">
+        {% for p in pc.payouts %}
+          {{ p.type }}: {{ p.currency }} {{ "%.2f"|format(p.amount) }}
+          {% if p.currency != 'EUR' %}&times; {{ p.exchange_rate }} ({{ p.rate_date }}){% endif %}
+          = &euro;{{ "%.2f"|format(p.eur_amount) }}{% if not loop.last %}<br>{% endif %}
+        {% endfor %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% endblock %}

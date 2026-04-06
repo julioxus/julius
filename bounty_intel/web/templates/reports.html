@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Reports - Bounty Intel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Report Manager ({{ total }})</h1>
+</div>
+
+<div class="pipeline">
+  {% for status, reports in pipeline.items() %}
+  <div class="pipeline-col">
+    <h3>{{ status|capitalize }} <span class="badge badge-gray">{{ reports|length }}</span></h3>
+    {% for r in reports %}
+    <a href="/reports/{{ r.id }}" class="pipeline-card" style="display:block;text-decoration:none;color:inherit">
+      <div class="title">{{ r.title[:40] }}{% if r.title|length > 40 %}...{% endif %}</div>
+      <div class="meta">
+        <span class="badge {{ severity_badge(r.severity or '') }}">{{ r.severity }}</span>
+        {{ r.platform }} &middot; {{ r.report_slug }}
+        <br>{{ days_ago(r.updated_at) }}
+      </div>
+    </a>
+    {% endfor %}
+    {% if not reports %}
+    <div class="muted" style="font-size:0.85rem;padding:0.5rem">No reports</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

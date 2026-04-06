@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Hunt Intelligence - Bounty Intel{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Hunt Intelligence</h1></div>
+
+{% if stats_by_class %}
+<h2>Success Rate by Vulnerability Class</h2>
+<table>
+  <thead><tr><th>Vuln Class</th><th>Attempts</th><th>Successes</th><th>Rate</th><th>Total Payout</th></tr></thead>
+  <tbody>
+    {% for vc, s in stats_by_class.items() %}
+    <tr>
+      <td><strong>{{ vc }}</strong></td>
+      <td class="mono">{{ s.total }}</td>
+      <td class="mono green">{{ s.success }}</td>
+      <td class="mono {% if s.total > 0 and s.success / s.total > 0.5 %}green{% elif s.total > 0 and s.success / s.total > 0.2 %}yellow{% else %}red{% endif %}">
+        {% if s.total > 0 %}{{ "%.0f"|format(s.success / s.total * 100) }}%{% else %}-{% endif %}
+      </td>
+      <td class="mono">&euro;{{ "%.0f"|format(s.total_payout) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>All Entries</h2>
+<table>
+  <thead><tr><th>Target</th><th>Class</th><th>Tech Stack</th><th>Result</th><th>Payout</th><th>Technique</th></tr></thead>
+  <tbody>
+    {% for e in entries %}
+    <tr>
+      <td>{{ e.target }}</td>
+      <td><span class="badge badge-gray">{{ e.vuln_class }}</span></td>
+      <td class="muted">{{ e.tech_stack|join(', ') if e.tech_stack else '-' }}</td>
+      <td>{% if e.success %}<span class="badge badge-green">success</span>{% else %}<span class="badge badge-red">fail</span>{% endif %}</td>
+      <td class="mono">&euro;{{ e.payout }}</td>
+      <td class="muted">{{ e.technique_summary[:60] if e.technique_summary else '-' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

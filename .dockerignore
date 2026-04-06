@@ -1,0 +1,12 @@
+.git
+.venv
+outputs/
+.claude/
+hexstrike-ai/
+tools/
+templates/
+*.pyc
+__pycache__
+.env
+*.md
+!bounty_intel/**/*.md
