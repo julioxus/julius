@@ -62,6 +62,30 @@ This repo provides Claude Code skills and agents for security testing, bug bount
     - Installers: Playwright, Kali, RecoX
 - `templates/` - Skill templates
 
+## Bounty Intel API — Source of Truth
+
+**CRITICAL**: When asked about bug bounty programs, engagements, findings, recon data, attack surface, submissions, or any engagement context, **always query the Bounty Intel API first**. This is the single source of truth for all operational data.
+
+**How to access** (from skills/agents):
+```python
+from bounty_intel.client import BountyIntelClient
+db = BountyIntelClient()  # reads BOUNTY_INTEL_API_URL + BOUNTY_INTEL_API_KEY from .env
+
+# Program context
+programs = db.list_programs(platform="hackerone")
+recon = db.get_program_recon(program_id)        # subdomains, endpoints, API specs
+surface = db.get_attack_surface(program_id)      # scope, coverage, stats
+findings = db.get_findings(program_id=program_id) # discovered vulnerabilities
+evidence = db.get_finding_evidence(finding_id)   # PoC files, HTTP logs
+submissions = db.get_submissions(program_id=program_id) # platform-synced status
+```
+
+**Available endpoints**: `/api/v1/programs`, `/programs/{id}/recon`, `/programs/{id}/attack-surface`, `/findings`, `/findings/{id}/evidence`, `/submissions`, `/reports`, `/hunt`, `/hunt/suggest`, `/forecast`, `/stats`
+
+**Dashboard**: https://bounty-dashboard-887002731862.europe-west1.run.app
+
+Do NOT rely on memory files or outputs/ directory for engagement state — always check the API for current data.
+
 ## Git Conventions
 
 IMPORTANT: Always follow these git workflows:
