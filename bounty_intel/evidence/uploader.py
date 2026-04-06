@@ -30,15 +30,17 @@ def _get_service_account_email() -> str:
     """Get the service account email for IAM-based signing on Cloud Run."""
     import google.auth
     credentials, _ = google.auth.default()
-    if hasattr(credentials, "service_account_email"):
-        return credentials.service_account_email
-    # Fetch from metadata server as last resort
-    import requests
-    return requests.get(
+    sa_email = getattr(credentials, "service_account_email", None)
+    if sa_email and sa_email != "default" and "@" in sa_email:
+        return sa_email
+    # On Cloud Run, compute credentials return "default" — resolve via metadata
+    import urllib.request
+    req = urllib.request.Request(
         "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email",
         headers={"Metadata-Flavor": "Google"},
-        timeout=2,
-    ).text
+    )
+    with urllib.request.urlopen(req, timeout=2) as resp:
+        return resp.read().decode()
 
 
 def generate_signed_url(gcs_path: str, expiration_seconds: int | None = None) -> str:
