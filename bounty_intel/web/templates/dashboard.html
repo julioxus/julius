@@ -1,5 +1,25 @@
 {% extends "base.html" %}
 {% block title %}Dashboard - Bounty Intel{% endblock %}
+{% block extra_css %}
+  .month-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.2rem; margin: 0.8rem 0; }
+  .month-card.month-current { border-color: var(--accent); border-width: 2px; }
+  .month-card.month-future { opacity: 0.7; border-style: dashed; }
+  .month-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.8rem; }
+  .month-title { font-size: 1.05rem; font-weight: 600; }
+  .month-card.month-current .month-title { color: var(--accent); }
+  .month-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; }
+  .month-kpi { text-align: center; }
+  .month-kpi-value { font-size: 1.3rem; font-weight: 700; }
+  .month-kpi-label { font-size: 0.72rem; color: var(--muted); margin-top: 0.15rem; }
+  .month-bar-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.7rem; }
+  .month-bar-track { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; display: flex; }
+  .month-bar-confirmed { height: 100%; background: var(--green); border-radius: 3px 0 0 3px; }
+  .month-bar-pending { height: 100%; background: rgba(99,102,241,0.5); }
+  .type-badge { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; padding: 2px 8px; border-radius: 6px; }
+  .type-past { background: rgba(139,143,163,0.15); color: var(--muted); }
+  .type-current { background: rgba(99,102,241,0.15); color: var(--accent); }
+  .type-future { background: rgba(234,179,8,0.15); color: var(--yellow); }
+{% endblock %}
 {% block content %}
 <div class="page-header">
   <h1>Earnings Dashboard</h1>
@@ -7,33 +27,8 @@
     <button class="btn btn-primary" hx-post="/sync" hx-swap="innerHTML" hx-target="#sync-status" hx-indicator="#sync-spinner">
       Sync H1 <span id="sync-spinner" class="htmx-indicator"><span class="spinner"></span></span>
     </button>
-    <button class="btn" onclick="document.getElementById('inti-modal').style.display='flex'">
-      Sync Intigriti
-    </button>
+    <button class="btn" onclick="document.getElementById('inti-modal').style.display='flex'">Sync Intigriti</button>
     <span id="sync-status"></span>
-  </div>
-</div>
-
-<!-- Intigriti Cookie Modal (same as settings) -->
-<div id="inti-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center">
-  <div class="card" style="width:520px;max-width:90vw">
-    <h3 style="margin-bottom:1rem">Sync Intigriti</h3>
-
-    <div class="muted" style="font-size:0.85rem;margin-bottom:1rem;line-height:1.6">
-      <strong>Option A (extension):</strong> Install the Bounty Intel Chrome extension for one-click sync.<br>
-      <strong>Option B (manual):</strong><br>
-      1. Open <a href="https://app.intigriti.com/researcher/inbox" target="_blank" style="color:var(--accent)">app.intigriti.com</a> (log in if needed)<br>
-      2. <kbd style="background:var(--bg);padding:1px 6px;border-radius:3px">F12</kbd> &rarr; Application &rarr; Cookies &rarr; app.intigriti.com<br>
-      3. Copy <code>__Host-Intigriti.Web.Researcher</code> value
-    </div>
-    <form hx-post="/sync/intigriti" hx-target="#sync-status" hx-swap="innerHTML"
-          hx-on::after-request="document.getElementById('inti-modal').style.display='none'">
-      <textarea name="cookie" placeholder="Paste cookie value..." style="width:100%;height:70px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:monospace;font-size:0.8rem;padding:0.8rem;resize:none;margin-bottom:0.8rem"></textarea>
-      <div style="display:flex;gap:0.5rem;justify-content:flex-end">
-        <button type="button" class="btn" onclick="document.getElementById('inti-modal').style.display='none'">Cancel</button>
-        <button type="submit" class="btn btn-primary">Sync</button>
-      </div>
-    </form>
   </div>
 </div>
 
@@ -41,90 +36,128 @@
 <div class="grid">
   <div class="card">
     <div class="card-value green mono">&euro;{{ "%.0f"|format(fc.confirmed_earnings_eur) }}</div>
-    <div class="card-label">Confirmed Earnings</div>
+    <div class="card-label">Confirmed Earnings (EUR)</div>
   </div>
   <div class="card">
     <div class="card-value accent mono">&euro;{{ "%.0f"|format(fc.scenarios.expected.total_eur) }}</div>
-    <div class="card-label">Expected Total (EV)</div>
+    <div class="card-label">Expected Total (prob-weighted)</div>
   </div>
   <div class="card">
-    <div class="card-value {% if fc.historical_acceptance_rate and fc.historical_acceptance_rate > 0.2 %}green{% elif fc.historical_acceptance_rate %}yellow{% else %}muted{% endif %} mono">
+    <div class="card-value mono">{{ total_subs }}</div>
+    <div class="card-label">Total Submissions</div>
+  </div>
+  <div class="card">
+    <div class="card-value {% if fc.historical_acceptance_rate and fc.historical_acceptance_rate > 0.3 %}green{% elif fc.historical_acceptance_rate %}yellow{% else %}muted{% endif %} mono">
       {% if fc.historical_acceptance_rate %}{{ "%.0f"|format(fc.historical_acceptance_rate * 100) }}%{% else %}N/A{% endif %}
     </div>
     <div class="card-label">Acceptance Rate</div>
   </div>
-  <div class="card">
-    <div class="card-value blue mono">{{ fc.pending_count }}</div>
-    <div class="card-label">Pending Submissions</div>
+</div>
+
+<!-- Submission Funnel -->
+<h2>Submission Funnel</h2>
+<div class="card">
+  <div class="progress-row">
+    <span class="progress-label">Submitted</span>
+    <div class="progress-bar"><div class="progress-fill" style="width:100%;background:var(--accent)"></div></div>
+    <span>{{ total_subs }}</span>
+  </div>
+  <div class="progress-row">
+    <span class="progress-label">Pending</span>
+    <div class="progress-bar"><div class="progress-fill" style="width:{{ (pending_count / [total_subs, 1]|max * 100)|int }}%;background:var(--blue)"></div></div>
+    <span>{{ pending_count }}</span>
+  </div>
+  <div class="progress-row">
+    <span class="progress-label">Paid</span>
+    <div class="progress-bar"><div class="progress-fill" style="width:{{ (paid_count / [total_subs, 1]|max * 100)|int }}%;background:var(--green)"></div></div>
+    <span>{{ paid_count }}</span>
+  </div>
+  <div class="progress-row">
+    <span class="progress-label">Rejected</span>
+    <div class="progress-bar"><div class="progress-fill" style="width:{{ (rejected_count / [total_subs, 1]|max * 100)|int }}%;background:var(--red)"></div></div>
+    <span>{{ rejected_count }} (dup:{{ dup_count }} info:{{ info_count }})</span>
   </div>
 </div>
 
 <!-- Scenarios -->
-<h2>Forecast Scenarios</h2>
+<h2>Earnings Scenarios</h2>
 <table class="scenario-table">
-  <thead>
-    <tr><th>Scenario</th><th>Additional</th><th>Total</th></tr>
-  </thead>
+  <thead><tr><th>Scenario</th><th>Additional</th><th>Total</th><th>Description</th></tr></thead>
   <tbody>
     {% for name, sc in fc.scenarios.items() %}
+    {% set color = {"pessimistic": "red", "expected": "yellow", "optimistic": "blue", "maximum": "accent"}.get(name, "") %}
     <tr>
-      <td>
-        <strong>{{ name|capitalize }}</strong>
-        <br><span class="muted" style="font-size:0.8rem">{{ sc.description }}</span>
-      </td>
+      <td><span class="{{ color }}" style="font-weight:600">{{ name|upper }}</span></td>
       <td class="mono">&euro;{{ "%.0f"|format(sc.additional_eur) }}</td>
-      <td class="mono {% if name == 'expected' %}accent{% elif name == 'optimistic' %}green{% endif %}" style="font-weight:600">
-        &euro;{{ "%.0f"|format(sc.total_eur) }}
-      </td>
+      <td class="mono" style="font-weight:600">&euro;{{ "%.0f"|format(sc.total_eur) }}</td>
+      <td class="muted" style="font-size:0.85rem">{{ sc.description }}</td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
 
-<!-- Monthly Breakdown -->
+<!-- Monthly Timeline -->
 <h2>Monthly Breakdown</h2>
-<table>
-  <thead>
-    <tr>
-      <th>Month</th><th>Confirmed</th><th>Pending EV</th><th>Total</th>
-      <th>Submitted</th><th>Paid</th><th>Rejected</th><th>Rate</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for m in fc.monthly_breakdown %}
-    <tr {% if m.type == 'current' %}style="background:rgba(99,102,241,0.06)"{% endif %}>
-      <td>
-        {{ m.label }}
-        {% if m.type == 'current' %}<span class="badge badge-blue">current</span>{% endif %}
-        {% if m.type == 'future' %}<span class="badge badge-gray">projected</span>{% endif %}
-      </td>
-      <td class="mono green">&euro;{{ "%.0f"|format(m.confirmed_eur) }}</td>
-      <td class="mono accent">&euro;{{ "%.0f"|format(m.pending_ev_eur) }}</td>
-      <td class="mono" style="font-weight:600">&euro;{{ "%.0f"|format(m.total_eur) }}</td>
-      <td class="mono">{{ m.submitted }}</td>
-      <td class="mono green">{{ m.paid }}</td>
-      <td class="mono red">{{ m.rejected }}</td>
-      <td class="mono">{% if m.acceptance_rate is not none %}{{ "%.0f"|format(m.acceptance_rate * 100) }}%{% else %}-{% endif %}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div style="display:flex;gap:1.5rem;margin:0.5rem 0 0.3rem;font-size:0.78rem;color:var(--muted)">
+  <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--green);margin-right:0.3rem;vertical-align:middle"></span>Confirmed</span>
+  <span><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:rgba(99,102,241,0.5);margin-right:0.3rem;vertical-align:middle"></span>Expected (pending)</span>
+</div>
 
-<!-- Ranked Submissions -->
-<h2>Top Pending Submissions (by EV)</h2>
+{% set max_total = namespace(v=1) %}
+{% for m in fc.monthly_breakdown %}
+  {% if m.total_eur > max_total.v %}{% set max_total.v = m.total_eur %}{% endif %}
+{% endfor %}
+
+{% for m in fc.monthly_breakdown %}
+{% set confirmed_pct = (m.confirmed_eur / max_total.v * 100) if max_total.v else 0 %}
+{% set pending_pct = (m.pending_ev_eur / max_total.v * 100) if max_total.v else 0 %}
+<div class="month-card month-{{ m.type }}">
+  <div class="month-header">
+    <span class="month-title">{{ m.label }}</span>
+    <span class="type-badge type-{{ m.type }}">{{ {"past":"past","current":"current","future":"forecast"}.get(m.type, m.type) }}</span>
+  </div>
+  <div class="month-kpis">
+    <div class="month-kpi">
+      <div class="month-kpi-value {% if m.confirmed_eur > 0 %}green{% else %}muted{% endif %}">&euro;{{ "%.0f"|format(m.confirmed_eur) }}</div>
+      <div class="month-kpi-label">Confirmed</div>
+    </div>
+    <div class="month-kpi">
+      <div class="month-kpi-value {% if m.pending_ev_eur > 0 %}accent{% elif m.confirmed_eur > 0 %}green{% else %}muted{% endif %}">&euro;{{ "%.0f"|format(m.total_eur) }}</div>
+      <div class="month-kpi-label">Expected Total</div>
+    </div>
+    <div class="month-kpi">
+      <div class="month-kpi-value">{{ m.submitted }}</div>
+      <div class="month-kpi-label">Submitted</div>
+    </div>
+    <div class="month-kpi">
+      <div class="month-kpi-value {% if m.acceptance_rate is not none and m.acceptance_rate < 0.3 %}red{% elif m.acceptance_rate is not none %}green{% else %}muted{% endif %}">
+        {% if m.acceptance_rate is not none %}{{ "%.0f"|format(m.acceptance_rate * 100) }}%{% else %}&mdash;{% endif %}
+      </div>
+      <div class="month-kpi-label">Acc. Rate</div>
+    </div>
+  </div>
+  <div class="month-bar-row">
+    <div class="month-bar-track">
+      <div class="month-bar-confirmed" style="width:{{ "%.1f"|format(confirmed_pct) }}%"></div>
+      <div class="month-bar-pending" style="width:{{ "%.1f"|format(pending_pct) }}%"></div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+<!-- Top Pending -->
+<h2>Top Pending (by Expected Value)</h2>
 <table>
-  <thead>
-    <tr><th>#</th><th>Prob</th><th>EV</th><th>Potential</th><th>Program</th><th>Title</th><th>Source</th></tr>
-  </thead>
+  <thead><tr><th>#</th><th>Prob</th><th>EV</th><th>Potential</th><th>Program</th><th>Title</th><th>Source</th></tr></thead>
   <tbody>
-    {% for s in fc.ranked_submissions[:20] %}
+    {% for s in fc.ranked_submissions[:15] %}
     <tr class="expandable">
       <td>{{ loop.index }}</td>
-      <td class="mono">{{ "%.0f"|format(s.acceptance_prob * 100) }}%</td>
-      <td class="mono accent">&euro;{{ "%.0f"|format(s.expected_value_eur) }}</td>
+      <td class="mono {% if s.acceptance_prob > 0.5 %}green{% elif s.acceptance_prob > 0.3 %}yellow{% else %}red{% endif %}">{{ "%.0f"|format(s.acceptance_prob * 100) }}%</td>
+      <td class="mono accent" style="font-weight:600">&euro;{{ "%.0f"|format(s.expected_value_eur) }}</td>
       <td class="mono">&euro;{{ "%.0f"|format(s.expected_bounty_eur) }}</td>
-      <td>{{ s.program[:20] }}</td>
-      <td>{{ s.title[:45] }}{% if s.title|length > 45 %}...{% endif %}</td>
+      <td>{{ s.program[:18] }}</td>
+      <td>{{ s.title[:40] }}{% if s.title|length > 40 %}...{% endif %}</td>
       <td>
         <span class="badge {% if s.prob_source == 'ai' %}badge-purple{% else %}badge-gray{% endif %}">{{ s.prob_source }}</span>
         <span class="badge {{ severity_badge(s.severity) }}">{{ s.severity }}</span>
@@ -133,28 +166,12 @@
     <tr class="detail-row">
       <td colspan="7">
         <div class="detail-panel">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
-            <div>
-              <div class="muted" style="font-size:0.8rem;margin-bottom:0.3rem">DETAILS</div>
-              <div>Platform: <strong>{{ s.platform }}</strong></div>
-              <div>Disposition: <span class="badge {{ badge_class(s.disposition) }}">{{ s.disposition }}</span></div>
-              <div>Listed: {{ s.listed_currency }} {{ "%.0f"|format(s.listed_bounty) }}</div>
-              <div>Submitted: {{ days_ago(s.created_at) }}</div>
-              <div>Est. resolve: {{ s.est_resolve_date }}{% if s.est_overdue %} <span class="badge badge-red">overdue</span>{% endif %}</div>
-            </div>
-            {% if s.triager_reasoning %}
-            <div>
-              <div class="muted" style="font-size:0.8rem;margin-bottom:0.3rem">AI TRIAGER</div>
-              <div style="font-style:italic;margin-bottom:0.5rem">{{ s.triager_reasoning }}</div>
-              {% if s.strengths %}
-              <div class="green" style="font-size:0.85rem">+ {{ s.strengths|join(' + ') }}</div>
-              {% endif %}
-              {% if s.weaknesses %}
-              <div class="red" style="font-size:0.85rem">- {{ s.weaknesses|join(' - ') }}</div>
-              {% endif %}
-            </div>
-            {% endif %}
+          {% if s.triager_reasoning %}<div style="font-style:italic;margin-bottom:0.5rem">{{ s.triager_reasoning }}</div>{% endif %}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+            {% if s.strengths %}<div>{% for st in s.strengths %}<span class="green" style="font-size:0.85rem">+ {{ st }}</span><br>{% endfor %}</div>{% endif %}
+            {% if s.weaknesses %}<div>{% for w in s.weaknesses %}<span class="red" style="font-size:0.85rem">- {{ w }}</span><br>{% endfor %}</div>{% endif %}
           </div>
+          <div class="muted" style="margin-top:0.4rem;font-size:0.8rem">{{ s.platform }} &middot; {{ s.disposition }} &middot; {{ s.listed_currency }} {{ "%.0f"|format(s.listed_bounty) }} &middot; resolve ~{{ s.est_resolve_date[:10] }}{% if s.est_overdue %} <span class="badge badge-red">overdue</span>{% endif %}</div>
         </div>
       </td>
     </tr>
@@ -170,7 +187,7 @@
     {% for pc in fc.payout_conversions %}
     <tr>
       <td>{{ pc.program }}</td>
-      <td class="mono green">&euro;{{ "%.2f"|format(pc.eur_amount) }}</td>
+      <td class="mono green" style="font-weight:600">&euro;{{ "%.2f"|format(pc.eur_amount) }}</td>
       <td class="muted" style="font-size:0.8rem">
         {% for p in pc.payouts %}
           {{ p.type }}: {{ p.currency }} {{ "%.2f"|format(p.amount) }}
@@ -184,4 +201,25 @@
 </table>
 {% endif %}
 
+<!-- Intigriti Cookie Modal -->
+<div id="inti-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center">
+  <div class="card" style="width:520px;max-width:90vw">
+    <h3 style="margin-bottom:1rem">Sync Intigriti</h3>
+    <div class="muted" style="font-size:0.85rem;margin-bottom:1rem;line-height:1.6">
+      <strong>Option A:</strong> Install the Bounty Intel Chrome extension for one-click sync.<br>
+      <strong>Option B:</strong><br>
+      1. Open <a href="https://app.intigriti.com/researcher/inbox" target="_blank" style="color:var(--accent)">app.intigriti.com</a><br>
+      2. <kbd style="background:var(--bg);padding:1px 6px;border-radius:3px">F12</kbd> &rarr; Application &rarr; Cookies<br>
+      3. Copy <code>__Host-Intigriti.Web.Researcher</code> value
+    </div>
+    <form hx-post="/sync/intigriti" hx-target="#sync-status" hx-swap="innerHTML"
+          hx-on::after-request="document.getElementById('inti-modal').style.display='none'">
+      <textarea name="cookie" placeholder="Paste cookie value..." style="width:100%;height:70px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:monospace;font-size:0.8rem;padding:0.8rem;resize:none;margin-bottom:0.8rem"></textarea>
+      <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+        <button type="button" class="btn" onclick="document.getElementById('inti-modal').style.display='none'">Cancel</button>
+        <button type="submit" class="btn btn-primary">Sync</button>
+      </div>
+    </form>
+  </div>
+</div>
 {% endblock %}

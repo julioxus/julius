@@ -52,12 +52,31 @@
   </form>
   {% endif %}
 
-  {% if report.platform_submission_id %}
-  {% set purl = platform_url(report.platform, report.platform_submission_id) %}
-  {% if purl and not report.status in ('submitted',) %}
-  <a href="{{ purl }}" target="_blank" class="btn" style="text-decoration:none">Open on {{ report.platform|capitalize }}</a>
+  {% if report.status in ('submitted', 'accepted', 'rejected') and not report.platform_submission_id %}
+  <button class="btn btn-primary" onclick="document.getElementById('link-modal').style.display='flex'">
+    Link to Platform
+  </button>
   {% endif %}
-  {% endif %}
+</div>
+
+<!-- Link to Platform modal (for already-submitted reports without platform ID) -->
+<div id="link-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center">
+  <div class="card" style="width:480px;max-width:90vw">
+    <h3 style="margin-bottom:1rem">Link to {{ report.platform|capitalize }}</h3>
+    <div class="muted" style="font-size:0.85rem;margin-bottom:1rem">
+      Enter the submission ID from the platform to link this report.
+    </div>
+    <form method="post" action="/reports/{{ report.id }}/submit">
+      <input type="text" name="platform_submission_id"
+        placeholder="{% if report.platform == 'hackerone' %}e.g. 3651585{% else %}e.g. ABCD-1234-EFGH{% endif %}"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:0.7rem 1rem;font-size:0.95rem;font-family:monospace;margin-bottom:1rem"
+        required autofocus>
+      <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+        <button type="button" class="btn" onclick="document.getElementById('link-modal').style.display='none'">Cancel</button>
+        <button type="submit" class="btn btn-primary">Link</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <!-- Submit modal -->

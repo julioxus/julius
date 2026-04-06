@@ -113,10 +113,14 @@ def _days_ago(dt) -> str:
     return f"{days}d ago"
 
 
-# Register template globals
+# Prevent browser caching of HTML pages
 @app.middleware("http")
-async def add_template_globals(request: Request, call_next):
+async def no_cache_html(request: Request, call_next):
     response = await call_next(request)
+    ct = response.headers.get("content-type", "")
+    if "text/html" in ct:
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
     return response
 
 
@@ -185,11 +189,33 @@ async def logout():
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     from bounty_intel.forecast.engine import compute_forecast
+    from bounty_intel import service
+    from bounty_intel.db import Submission, get_session
+    from sqlalchemy import func, select
+
     fc = compute_forecast()
+
+    session = get_session()
+    total_subs = session.scalar(select(func.count(Submission.id))) or 0
+    pending_count = session.scalar(select(func.count(Submission.id)).where(
+        Submission.disposition.in_(["new", "triaged", "needs_more_info", "accepted"]))) or 0
+    paid_count = session.scalar(select(func.count(Submission.id)).where(Submission.disposition == "resolved")) or 0
+    rejected_all = session.scalars(select(Submission.disposition).where(
+        Submission.disposition.in_(["duplicate", "informative", "not_applicable", "wont_fix"]))).all()
+    rejected_count = len(rejected_all)
+    dup_count = sum(1 for d in rejected_all if d == "duplicate")
+    info_count = sum(1 for d in rejected_all if d == "informative")
+    session.close()
 
     return _render(request, "dashboard.html", {
         "active_page": "dashboard",
         "fc": fc,
+        "total_subs": total_subs,
+        "pending_count": pending_count,
+        "paid_count": paid_count,
+        "rejected_count": rejected_count,
+        "dup_count": dup_count,
+        "info_count": info_count,
         "badge_class": _badge_class,
         "severity_badge": _severity_badge,
         "days_ago": _days_ago,
