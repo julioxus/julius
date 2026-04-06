@@ -52,6 +52,7 @@ logs/
 # Screenshots and evidence (sensitive)
 screenshots/
 evidence/
+!bounty_intel/evidence/
 *.png
 *.jpg
 *.jpeg
