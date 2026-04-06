@@ -616,6 +616,22 @@ async def evidence_needs_backfill(limit: int = 500, offset: int = 0):
     return result
 
 
+@router.delete("/evidence/purge-unavailable", dependencies=[Depends(verify_api_key)])
+async def purge_unavailable_evidence():
+    """Delete all evidence records that have no GCS path (unreachable files)."""
+    from bounty_intel.db import EvidenceFile, get_session
+    from sqlalchemy import delete, or_
+    session = get_session()
+    stmt = delete(EvidenceFile).where(
+        or_(EvidenceFile.gcs_path == "", EvidenceFile.gcs_path.is_(None)),
+    )
+    result = session.execute(stmt)
+    deleted = result.rowcount
+    session.commit()
+    session.close()
+    return {"deleted": deleted}
+
+
 @router.patch("/evidence/{evidence_id}/gcs", dependencies=[Depends(verify_api_key)])
 async def update_evidence_gcs(evidence_id: int, data: dict):
     from bounty_intel.db import EvidenceFile, get_session
