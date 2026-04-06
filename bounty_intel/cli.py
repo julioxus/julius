@@ -6,6 +6,7 @@ Usage:
     python -m bounty_intel forecast
     python -m bounty_intel serve [--port 8000]
     python -m bounty_intel stats
+    python -m bounty_intel mcp
     python -m bounty_intel report create --program HANDLE --file PATH
 """
 
@@ -73,6 +74,11 @@ def cmd_stats(args):
         print(f"  {k}: {v}")
 
 
+def cmd_mcp(args):
+    from bounty_intel.mcp_server import main as mcp_main
+    mcp_main()
+
+
 def cmd_report(args):
     if args.action == "create":
         from bounty_intel.client import BountyIntelClient
@@ -122,6 +128,9 @@ def main():
     # stats
     subparsers.add_parser("stats", help="Show DB statistics")
 
+    # mcp
+    subparsers.add_parser("mcp", help="Start MCP server (stdio transport)")
+
     # report
     p_report = subparsers.add_parser("report", help="Manage submission reports")
     p_report.add_argument("action", choices=["create", "list"])
@@ -141,6 +150,7 @@ def main():
         "forecast": cmd_forecast,
         "serve": cmd_serve,
         "stats": cmd_stats,
+        "mcp": cmd_mcp,
         "report": cmd_report,
     }[args.command](args)
 

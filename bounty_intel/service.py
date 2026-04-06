@@ -319,6 +319,70 @@ def bulk_log_activity(engagement_id: int, entries: list[dict]) -> int:
         return count
 
 
+# ── Payouts ──────────────────────────────────────────────────
+def get_payouts(*, submission_id: int | None = None, program_id: int | None = None) -> list[Payout]:
+    with get_session() as s:
+        q = select(Payout).join(Submission)
+        if submission_id:
+            q = q.where(Payout.submission_id == submission_id)
+        if program_id:
+            q = q.where(Submission.program_id == program_id)
+        return list(s.scalars(q.order_by(Payout.paid_date.desc().nullslast())).all())
+
+
+# ── Individual Gets ─────────────────────────────────────────
+def get_program(program_id: int) -> Program | None:
+    with get_session() as s:
+        return s.get(Program, program_id)
+
+
+def get_finding(finding_id: int) -> Finding | None:
+    with get_session() as s:
+        return s.scalar(
+            select(Finding).options(joinedload(Finding.program)).where(Finding.id == finding_id)
+        )
+
+
+def get_report(report_id: int) -> SubmissionReport | None:
+    with get_session() as s:
+        return s.scalar(
+            select(SubmissionReport).options(joinedload(SubmissionReport.program))
+            .where(SubmissionReport.id == report_id)
+        )
+
+
+# ── Engagement Listing ──────────────────────────────────────
+def list_engagements(*, status: str | None = None, program_id: int | None = None) -> list[Engagement]:
+    with get_session() as s:
+        q = select(Engagement).options(joinedload(Engagement.program))
+        if status:
+            q = q.where(Engagement.status == status)
+        if program_id:
+            q = q.where(Engagement.program_id == program_id)
+        return list(s.scalars(q.order_by(Engagement.started_at.desc())).unique().all())
+
+
+# ── Report Evidence ─────────────────────────────────────────
+def get_report_evidence(report_id: int) -> list[EvidenceFile]:
+    with get_session() as s:
+        return list(s.scalars(
+            select(EvidenceFile).where(EvidenceFile.report_id == report_id)
+            .order_by(EvidenceFile.filename)
+        ).all())
+
+
+# ── Finding Search ──────────────────────────────────────────
+def search_findings(query: str, *, program_id: int | None = None) -> list[Finding]:
+    with get_session() as s:
+        pattern = f"%{query}%"
+        q = select(Finding).options(joinedload(Finding.program)).where(
+            (Finding.title.ilike(pattern)) | (Finding.description.ilike(pattern))
+        )
+        if program_id:
+            q = q.where(Finding.program_id == program_id)
+        return list(s.scalars(q.order_by(Finding.created_at.desc()).limit(50)).unique().all())
+
+
 # ── Stats ────────────────────────────────────────────────────
 def get_stats() -> dict:
     with get_session() as s:

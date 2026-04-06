@@ -451,6 +451,182 @@ async def delete_program(program_id: int):
     return {"ok": True, "deleted": program_id}
 
 
+# ── Program Detail ──────────────────────────────────────────
+@router.get("/programs/{program_id}/detail", dependencies=[Depends(verify_api_key)])
+async def get_program_detail(program_id: int):
+    from bounty_intel import service
+
+    p = service.get_program(program_id)
+    if not p:
+        raise HTTPException(404, "Program not found")
+    return {"id": p.id, "platform": p.platform, "handle": p.platform_handle,
+            "company_name": p.company_name, "status": p.status, "bounty_type": p.bounty_type,
+            "scope": p.scope or {}, "oos_rules": p.oos_rules or {},
+            "tech_stack": p.tech_stack or [], "notes": p.notes or "",
+            "logo_url": p.logo_url or "",
+            "created_at": p.created_at.isoformat() if p.created_at else None}
+
+
+# ── Engagement Listing ──────────────────────────────────────
+@router.get("/engagements", dependencies=[Depends(verify_api_key)])
+async def list_engagements(status: str = "", program_id: int = 0):
+    from bounty_intel import service
+
+    engs = service.list_engagements(
+        status=status or None, program_id=program_id or None,
+    )
+    return [{"id": e.id, "program_id": e.program_id, "status": e.status,
+             "started_at": e.started_at.isoformat() if e.started_at else None,
+             "notes": e.notes or "",
+             "company_name": e.program.company_name if e.program else None}
+            for e in engs]
+
+
+# ── Finding Search ──────────────────────────────────────────
+# NOTE: Must be registered BEFORE /findings/{finding_id} to avoid path collision
+@router.get("/findings/search", dependencies=[Depends(verify_api_key)])
+async def search_findings(q: str = "", program_id: int = 0):
+    from bounty_intel import service
+
+    if not q:
+        raise HTTPException(400, "Query parameter 'q' is required")
+    results = service.search_findings(q, program_id=program_id or None)
+    return [{"id": f.id, "program_id": f.program_id, "title": f.title,
+             "vuln_class": f.vuln_class, "severity": f.severity, "status": f.status,
+             "is_building_block": f.is_building_block,
+             "description": f.description[:500] if f.description else "",
+             "company_name": f.program.company_name if f.program else None,
+             "created_at": f.created_at.isoformat() if f.created_at else None}
+            for f in results]
+
+
+# ── Finding Detail ──────────────────────────────────────────
+@router.get("/findings/{finding_id}", dependencies=[Depends(verify_api_key)])
+async def get_finding_detail(finding_id: int):
+    from bounty_intel import service
+
+    f = service.get_finding(finding_id)
+    if not f:
+        raise HTTPException(404, "Finding not found")
+    return {"id": f.id, "program_id": f.program_id, "engagement_id": f.engagement_id,
+            "title": f.title, "vuln_class": f.vuln_class, "severity": f.severity,
+            "cvss_vector": f.cvss_vector or "", "status": f.status,
+            "description": f.description or "", "steps_to_reproduce": f.steps_to_reproduce or "",
+            "impact": f.impact or "", "poc_code": f.poc_code or "",
+            "poc_output": f.poc_output or "",
+            "chain_with": f.chain_with or [], "is_building_block": f.is_building_block,
+            "building_block_notes": f.building_block_notes or "",
+            "company_name": f.program.company_name if f.program else None,
+            "created_at": f.created_at.isoformat() if f.created_at else None,
+            "updated_at": f.updated_at.isoformat() if f.updated_at else None}
+
+
+# ── Report Detail ───────────────────────────────────────────
+@router.get("/reports/{report_id}", dependencies=[Depends(verify_api_key)])
+async def get_report_detail(report_id: int):
+    from bounty_intel import service
+
+    r = service.get_report(report_id)
+    if not r:
+        raise HTTPException(404, "Report not found")
+    return {"id": r.id, "program_id": r.program_id, "finding_id": r.finding_id,
+            "platform": r.platform, "report_slug": r.report_slug, "title": r.title,
+            "severity": r.severity, "cvss_vector": r.cvss_vector or "",
+            "markdown_body": r.markdown_body, "status": r.status,
+            "validation_result": r.validation_result or {},
+            "company_name": r.program.company_name if r.program else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None}
+
+
+# ── Report Evidence ─────────────────────────────────────────
+@router.get("/reports/{report_id}/evidence", dependencies=[Depends(verify_api_key)])
+async def get_report_evidence(report_id: int):
+    from bounty_intel import service
+
+    files = service.get_report_evidence(report_id)
+    return [{"id": f.id, "filename": f.filename, "content_type": f.content_type or "",
+             "size_bytes": f.size_bytes or 0, "local_path": f.local_path or "",
+             "gcs_path": f.gcs_path or ""} for f in files]
+
+
+# ── Evidence Upload ─────────────────────────────────────────
+class EvidenceIn(BaseModel):
+    filename: str
+    local_path: str = ""
+    content_type: str = ""
+    size_bytes: int = 0
+    report_id: int | None = None
+
+
+@router.post("/findings/{finding_id}/evidence/upload", dependencies=[Depends(verify_api_key)])
+async def upload_evidence(finding_id: int, data: EvidenceIn):
+    from bounty_intel import service
+
+    gcs_path = ""
+    if data.local_path:
+        from pathlib import Path
+        local = Path(data.local_path)
+        if local.exists():
+            from bounty_intel.evidence.uploader import upload_to_gcs
+            gcs_path = upload_to_gcs(local, f"findings/{finding_id}")
+
+    eid = service.save_evidence_file(
+        finding_id=finding_id, report_id=data.report_id,
+        filename=data.filename, local_path=data.local_path,
+        gcs_path=gcs_path, content_type=data.content_type,
+        size_bytes=data.size_bytes,
+    )
+    return {"id": eid, "gcs_path": gcs_path}
+
+
+# ── Evidence Signed URL ─────────────────────────────────────
+@router.get("/evidence/{evidence_id}/url", dependencies=[Depends(verify_api_key)])
+async def get_evidence_url(evidence_id: int):
+    from bounty_intel.db import EvidenceFile, get_session
+
+    session = get_session()
+    ef = session.get(EvidenceFile, evidence_id)
+    session.close()
+    if not ef:
+        raise HTTPException(404, "Evidence file not found")
+    if not ef.gcs_path:
+        raise HTTPException(400, "No GCS path — file is local only")
+    from bounty_intel.evidence.uploader import generate_signed_url
+    url = generate_signed_url(ef.gcs_path)
+    return {"url": url, "filename": ef.filename}
+
+
+# ── Payouts ─────────────────────────────────────────────────
+@router.get("/payouts", dependencies=[Depends(verify_api_key)])
+async def list_payouts(submission_id: int = 0, program_id: int = 0):
+    from bounty_intel import service
+
+    payouts = service.get_payouts(
+        submission_id=submission_id or None, program_id=program_id or None,
+    )
+    return [{"id": p.id, "submission_id": p.submission_id,
+             "amount": float(p.amount), "currency": p.currency,
+             "amount_eur": float(p.amount_eur) if p.amount_eur else None,
+             "payout_type": p.payout_type, "status": p.status,
+             "paid_date": p.paid_date.isoformat() if p.paid_date else None}
+            for p in payouts]
+
+
+# ── Activity Listing ────────────────────────────────────────
+@router.get("/activity", dependencies=[Depends(verify_api_key)])
+async def list_activity(engagement_id: int = 0, limit: int = 100):
+    from bounty_intel import service
+
+    logs = service.get_activity(
+        engagement_id=engagement_id or None, limit=min(limit, 500),
+    )
+    return [{"id": a.id, "engagement_id": a.engagement_id, "action": a.action,
+             "details": a.details or {},
+             "created_at": a.created_at.isoformat() if a.created_at else None}
+            for a in logs]
+
+
 @router.post("/admin/dedup-programs", dependencies=[Depends(verify_api_key)])
 async def dedup_programs():
     from bounty_intel.migration.import_existing import deduplicate_programs

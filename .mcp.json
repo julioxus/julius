@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "bounty-intel": {
+      "command": "/Users/jmartinez/repos/julius/.venv/bin/python",
+      "args": [
+        "/Users/jmartinez/repos/julius/bounty_intel/mcp_server.py"
+      ],
+      "description": "Bounty Intel - Bug bounty operations: programs, findings, reports, recon, submissions, payouts, hunt memory, forecasts",
+      "timeout": 60
+    }
+  }
+}

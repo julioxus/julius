@@ -54,6 +54,11 @@ class BountyIntelClient:
     # ------------------------------------------------------------------
     # Programs
     # ------------------------------------------------------------------
+    def _delete(self, path: str) -> Any:
+        resp = requests.delete(f"{self.api_url}{path}", headers=self._headers(), timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
     def list_programs(self, platform: str | None = None, status: str | None = None) -> list[dict]:
         params = {}
         if platform:
@@ -62,6 +67,10 @@ class BountyIntelClient:
             params["status"] = status
         return self._get("/api/v1/programs", params)
 
+    def get_program(self, program_id: int) -> dict:
+        """Get full program detail including scope and OOS rules."""
+        return self._get(f"/api/v1/programs/{program_id}/detail")
+
     def upsert_program(self, *, platform: str, handle: str, company_name: str, **kwargs) -> int:
         data = {"platform": platform, "handle": handle, "company_name": company_name, **kwargs}
         return self._post("/api/v1/programs", data)["id"]
@@ -69,6 +78,15 @@ class BountyIntelClient:
     # ------------------------------------------------------------------
     # Engagements
     # ------------------------------------------------------------------
+    def list_engagements(self, status: str | None = None, program_id: int | None = None) -> list[dict]:
+        """List all engagements, optionally filtered by status or program."""
+        params = {}
+        if status:
+            params["status"] = status
+        if program_id:
+            params["program_id"] = program_id
+        return self._get("/api/v1/engagements", params)
+
     def get_engagement(self, platform: str, handle: str) -> dict | None:
         try:
             return self._get(f"/api/v1/engagements/{platform}/{handle}")
@@ -108,6 +126,17 @@ class BountyIntelClient:
     # ------------------------------------------------------------------
     # Findings
     # ------------------------------------------------------------------
+    def get_finding(self, finding_id: int) -> dict:
+        """Get full finding detail with all fields."""
+        return self._get(f"/api/v1/findings/{finding_id}")
+
+    def search_findings(self, query: str, program_id: int | None = None) -> list[dict]:
+        """Search findings by text across title and description."""
+        params = {"q": query}
+        if program_id:
+            params["program_id"] = program_id
+        return self._get("/api/v1/findings/search", params)
+
     def get_findings(self, *, program_id: int | None = None, status: str | None = None,
                      vuln_class: str | None = None, is_building_block: bool | None = None) -> list[dict]:
         params = {}
@@ -133,13 +162,19 @@ class BountyIntelClient:
         return self._get(f"/api/v1/findings/{finding_id}/evidence")
 
     def delete_finding(self, finding_id: int) -> None:
-        resp = requests.delete(f"{self.api_url}/api/v1/findings/{finding_id}",
-                               headers=self._headers(), timeout=30)
-        resp.raise_for_status()
+        self._delete(f"/api/v1/findings/{finding_id}")
 
     # ------------------------------------------------------------------
     # Reports
     # ------------------------------------------------------------------
+    def get_report(self, report_id: int) -> dict:
+        """Get full report detail including markdown_body."""
+        return self._get(f"/api/v1/reports/{report_id}")
+
+    def get_report_evidence(self, report_id: int) -> list[dict]:
+        """Get evidence files linked to a report."""
+        return self._get(f"/api/v1/reports/{report_id}/evidence")
+
     def list_reports(self, status: str | None = None, program_id: int | None = None) -> list[dict]:
         params = {}
         if status:
@@ -158,13 +193,41 @@ class BountyIntelClient:
         self._patch(f"/api/v1/reports/{report_id}", kwargs)
 
     def delete_report(self, report_id: int) -> None:
-        resp = requests.delete(f"{self.api_url}/api/v1/reports/{report_id}",
-                               headers=self._headers(), timeout=30)
-        resp.raise_for_status()
+        self._delete(f"/api/v1/reports/{report_id}")
 
     def mark_report_submitted(self, report_id: int, platform_submission_id: str) -> None:
         self._post(f"/api/v1/reports/{report_id}/submit",
                    {"platform_submission_id": platform_submission_id})
+
+    # ------------------------------------------------------------------
+    # Evidence
+    # ------------------------------------------------------------------
+    def upload_evidence(self, finding_id: int, filename: str, *,
+                        local_path: str = "", content_type: str = "",
+                        size_bytes: int = 0, report_id: int | None = None) -> dict:
+        """Upload evidence metadata (and optionally upload local file to GCS)."""
+        data = {"filename": filename, "local_path": local_path,
+                "content_type": content_type, "size_bytes": size_bytes}
+        if report_id:
+            data["report_id"] = report_id
+        return self._post(f"/api/v1/findings/{finding_id}/evidence/upload", data)
+
+    def get_evidence_url(self, evidence_id: int) -> dict:
+        """Get signed download URL for an evidence file."""
+        return self._get(f"/api/v1/evidence/{evidence_id}/url")
+
+    # ------------------------------------------------------------------
+    # Payouts
+    # ------------------------------------------------------------------
+    def get_payouts(self, *, submission_id: int | None = None,
+                    program_id: int | None = None) -> list[dict]:
+        """List payouts, optionally filtered by submission or program."""
+        params = {}
+        if submission_id:
+            params["submission_id"] = submission_id
+        if program_id:
+            params["program_id"] = program_id
+        return self._get("/api/v1/payouts", params)
 
     # ------------------------------------------------------------------
     # Submissions
@@ -201,6 +264,13 @@ class BountyIntelClient:
     # ------------------------------------------------------------------
     # Activity
     # ------------------------------------------------------------------
+    def get_activity(self, engagement_id: int | None = None, limit: int = 100) -> list[dict]:
+        """List activity logs, optionally filtered by engagement."""
+        params: dict[str, Any] = {"limit": limit}
+        if engagement_id:
+            params["engagement_id"] = engagement_id
+        return self._get("/api/v1/activity", params)
+
     def log_activity(self, engagement_id: int | None, action: str, details: dict | None = None) -> int:
         data = {"engagement_id": engagement_id, "action": action, "details": details or {}}
         return self._post("/api/v1/activity", data)["id"]
