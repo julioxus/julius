@@ -4,28 +4,23 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from bounty_intel.client import BountyIntelClient
+from bounty_intel import service
 from bounty_intel.sync import hackerone, intigriti
 
 
 def sync_all(sources: list[str] | None = None) -> dict:
     """Run delta sync for specified sources (or all).
 
-    On local environments, Intigriti sync automatically launches a browser
-    for login if the session cookie is expired. On servers (Cloud Run),
-    it skips Intigriti and syncs only HackerOne.
-
     Returns per-source stats dict.
     """
     if sources is None:
         sources = ["hackerone", "intigriti"]
 
-    client = BountyIntelClient()
     results = {}
 
     for source in sources:
         print(f"\n--- Syncing {source} ---")
-        state = client.get_sync_state(source)
+        state = service.get_sync_state(source)
         since = state.last_submission_updated if state else None
 
         if since:
@@ -50,7 +45,7 @@ def sync_all(sources: list[str] | None = None) -> dict:
         # Update watermark
         max_updated = stats.get("max_updated")
         if max_updated:
-            client.update_sync_state(source, max_updated)
+            service.update_sync_state(source, max_updated)
             print(f"  Watermark updated to: {max_updated.isoformat()}")
 
         results[source] = stats

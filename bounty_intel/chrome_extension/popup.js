@@ -1,6 +1,6 @@
 // Configuration — update these after deployment
 const DASHBOARD_URL = "https://bounty-dashboard-887002731862.europe-west1.run.app";
-const API_KEY = ""; // Set your BOUNTY_INTEL_API_KEY here
+const API_KEY = "d05f48f3e4db426e3a1d107fc12006973114cbc5fd078ca78a51617b54c79ea2"; // Set your BOUNTY_INTEL_API_KEY here
 
 const COOKIE_NAME = "__Host-Intigriti.Web.Researcher";
 const COOKIE_URL = "https://app.intigriti.com";
