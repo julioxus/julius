@@ -597,6 +597,39 @@ async def get_evidence_url(evidence_id: int):
     return {"url": url, "filename": ef.filename}
 
 
+# ── Evidence backfill helpers ───────────────────────────────
+@router.get("/evidence/needs-backfill", dependencies=[Depends(verify_api_key)])
+async def evidence_needs_backfill(limit: int = 500, offset: int = 0):
+    from bounty_intel.db import EvidenceFile, get_session
+    from sqlalchemy import select, or_
+    session = get_session()
+    stmt = select(EvidenceFile).where(
+        EvidenceFile.local_path != "",
+        EvidenceFile.local_path.isnot(None),
+        or_(EvidenceFile.gcs_path == "", EvidenceFile.gcs_path.is_(None)),
+    ).offset(offset).limit(limit)
+    files = session.scalars(stmt).all()
+    result = [{"id": f.id, "finding_id": f.finding_id, "report_id": f.report_id,
+               "filename": f.filename, "local_path": f.local_path,
+               "content_type": f.content_type} for f in files]
+    session.close()
+    return result
+
+
+@router.patch("/evidence/{evidence_id}/gcs", dependencies=[Depends(verify_api_key)])
+async def update_evidence_gcs(evidence_id: int, data: dict):
+    from bounty_intel.db import EvidenceFile, get_session
+    session = get_session()
+    ef = session.get(EvidenceFile, evidence_id)
+    if not ef:
+        session.close()
+        raise HTTPException(404, "Evidence not found")
+    ef.gcs_path = data.get("gcs_path", "")
+    session.commit()
+    session.close()
+    return {"id": evidence_id, "gcs_path": ef.gcs_path}
+
+
 # ── Payouts ─────────────────────────────────────────────────
 @router.get("/payouts", dependencies=[Depends(verify_api_key)])
 async def list_payouts(submission_id: int = 0, program_id: int = 0):
