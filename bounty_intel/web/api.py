@@ -6,8 +6,6 @@ Skills running locally use these instead of direct DB access.
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 
@@ -20,8 +18,14 @@ router = APIRouter(prefix="/api/v1")
 async def verify_api_key(x_api_key: str = Header()):
     if not settings.api_key:
         raise HTTPException(503, "API key not configured on server")
-    if x_api_key != settings.api_key:
+    if not _constant_time_compare(x_api_key, settings.api_key):
         raise HTTPException(401, "Invalid API key")
+
+
+def _constant_time_compare(a: str, b: str) -> bool:
+    """Prevent timing attacks on API key comparison."""
+    import hmac
+    return hmac.compare_digest(a.encode(), b.encode())
 
 
 # ── Schemas ──────────────────────────────────────────────────
@@ -63,7 +67,11 @@ class FindingIn(BaseModel):
 class FindingUpdate(BaseModel):
     status: str | None = None
     severity: str | None = None
+    cvss_vector: str | None = None
+    vuln_class: str | None = None
     description: str | None = None
+    impact: str | None = None
+    steps_to_reproduce: str | None = None
     is_building_block: bool | None = None
     building_block_notes: str | None = None
 
@@ -119,7 +127,8 @@ async def list_programs(platform: str = "", status: str = ""):
     programs = service.list_programs(platform=platform or None, status=status or None)
     return [{"id": p.id, "platform": p.platform, "handle": p.platform_handle,
              "company_name": p.company_name, "status": p.status, "bounty_type": p.bounty_type,
-             "tech_stack": p.tech_stack or [], "notes": p.notes or ""} for p in programs]
+             "tech_stack": p.tech_stack or [], "notes": p.notes or "",
+             "logo_url": p.logo_url or ""} for p in programs]
 
 
 @router.post("/programs", dependencies=[Depends(verify_api_key)])
@@ -157,11 +166,19 @@ async def create_engagement(data: EngagementIn):
     return {"id": eid}
 
 
+class EngagementUpdate(BaseModel):
+    status: str | None = None
+    notes: str | None = None
+    recon_data: dict | None = None
+    attack_surface: dict | None = None
+
+
 @router.patch("/engagements/{engagement_id}", dependencies=[Depends(verify_api_key)])
-async def update_engagement(engagement_id: int, data: dict[str, Any]):
+async def update_engagement(engagement_id: int, data: EngagementUpdate):
     from bounty_intel import service
-    
-    service.update_engagement(engagement_id, **data)
+
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    service.update_engagement(engagement_id, **updates)
     return {"ok": True}
 
 
@@ -195,9 +212,35 @@ async def create_finding(data: FindingIn):
 @router.patch("/findings/{finding_id}", dependencies=[Depends(verify_api_key)])
 async def update_finding(finding_id: int, data: FindingUpdate):
     from bounty_intel import service
-    
+
     updates = {k: v for k, v in data.model_dump().items() if v is not None}
     service.update_finding(finding_id, **updates)
+    return {"ok": True}
+
+
+@router.delete("/findings/{finding_id}", dependencies=[Depends(verify_api_key)])
+async def delete_finding(finding_id: int):
+    from bounty_intel.db import Finding, SubmissionReport, get_session
+    from sqlalchemy import select
+
+    session = get_session()
+    finding = session.get(Finding, finding_id)
+    if not finding:
+        session.close()
+        raise HTTPException(404, "Finding not found")
+    # Block if linked to a submitted report
+    linked = session.scalar(
+        select(SubmissionReport).where(
+            SubmissionReport.finding_id == finding_id,
+            SubmissionReport.status.in_(["submitted", "accepted"]),
+        )
+    )
+    if linked:
+        session.close()
+        raise HTTPException(409, "Cannot delete: finding is linked to a submitted report")
+    session.delete(finding)
+    session.commit()
+    session.close()
     return {"ok": True}
 
 
@@ -231,12 +274,49 @@ async def api_update_report(report_id: int, data: ReportUpdate):
     return {"ok": True}
 
 
+@router.delete("/reports/{report_id}", dependencies=[Depends(verify_api_key)])
+async def delete_report(report_id: int):
+    from bounty_intel.db import SubmissionReport, get_session
+
+    session = get_session()
+    report = session.get(SubmissionReport, report_id)
+    if not report:
+        session.close()
+        raise HTTPException(404, "Report not found")
+    if report.status in ("submitted", "accepted"):
+        session.close()
+        raise HTTPException(409, "Cannot delete a submitted/accepted report")
+    session.delete(report)
+    session.commit()
+    session.close()
+    return {"ok": True}
+
+
 @router.post("/reports/{report_id}/submit", dependencies=[Depends(verify_api_key)])
 async def api_submit_report(report_id: int, platform_submission_id: str = ""):
     from bounty_intel import service
     
     service.mark_report_submitted(report_id, platform_submission_id)
     return {"ok": True}
+
+
+# ── Submissions ─────────────────────────────────────────────
+@router.get("/submissions", dependencies=[Depends(verify_api_key)])
+async def list_submissions(platform: str = "", disposition: str = "", program_id: int = 0):
+    from bounty_intel import service
+
+    subs = service.get_submissions(
+        platform=platform or None, disposition=disposition or None,
+        program_id=program_id or None,
+    )
+    return [{"id": sub.id, "platform_id": sub.platform_id, "platform": sub.platform,
+             "program_id": sub.program_id, "report_id": sub.report_id,
+             "title": sub.title, "severity": sub.severity, "disposition": sub.disposition,
+             "listed_bounty": float(sub.listed_bounty or 0),
+             "listed_currency": sub.listed_currency,
+             "company_name": sub.program.company_name if sub.program else None,
+             "created_at": sub.created_at.isoformat() if sub.created_at else None}
+            for sub in subs]
 
 
 # ── Hunt Memory ──────────────────────────────────────────────
@@ -288,6 +368,7 @@ async def save_evaluation(data: AIEvalIn):
 class SyncRequest(BaseModel):
     source: str = "all"
     cookie: str = ""  # Intigriti session cookie (optional)
+    force: bool = False  # ignore watermark, full re-sync
 
 
 # ── Sync ─────────────────────────────────────────────────────
@@ -301,7 +382,7 @@ async def api_sync(data: SyncRequest):
     from bounty_intel.sync.delta import sync_all
     source = data.source
     sources = None if source == "all" else [source]
-    results = sync_all(sources=sources)
+    results = sync_all(sources=sources, force=data.force)
     return results
 
 
@@ -313,6 +394,31 @@ async def api_forecast():
 
 
 # ── Admin ────────────────────────────────────────────────────
+@router.delete("/programs/{program_id}", dependencies=[Depends(verify_api_key)])
+async def delete_program(program_id: int):
+    from bounty_intel.db import Program, Submission, Finding, SubmissionReport, Engagement, get_session
+    from sqlalchemy import select, func
+
+    session = get_session()
+    # Safety: only delete if program has zero findings, reports, and submissions
+    for model in (Finding, SubmissionReport, Submission):
+        count = session.scalar(select(func.count(model.id)).where(model.program_id == program_id)) or 0
+        if count > 0:
+            session.close()
+            raise HTTPException(409, f"Program has {count} {model.__tablename__}, cannot delete")
+    program = session.get(Program, program_id)
+    if not program:
+        session.close()
+        raise HTTPException(404, "Program not found")
+    # Delete orphan engagements
+    for eng in session.scalars(select(Engagement).where(Engagement.program_id == program_id)).all():
+        session.delete(eng)
+    session.delete(program)
+    session.commit()
+    session.close()
+    return {"ok": True, "deleted": program_id}
+
+
 @router.post("/admin/dedup-programs", dependencies=[Depends(verify_api_key)])
 async def dedup_programs():
     from bounty_intel.migration.import_existing import deduplicate_programs

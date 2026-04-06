@@ -30,7 +30,7 @@ def fetch_ecb_rate(currency: str, on_date: str) -> float:
             rate = data.get("rates", {}).get("EUR", FALLBACK_EUR_RATES.get(currency, 1.0))
             _rate_cache[cache_key] = rate
             return rate
-    except (urllib.error.URLError, json.JSONDecodeError, KeyError):
+    except (urllib.error.URLError, json.JSONDecodeError, KeyError, TimeoutError, OSError):
         fallback = FALLBACK_EUR_RATES.get(currency, 1.0)
         _rate_cache[cache_key] = fallback
         return fallback

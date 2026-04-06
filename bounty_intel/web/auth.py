@@ -43,8 +43,9 @@ def setup_oauth():
 
 
 def _get_serializer() -> URLSafeTimedSerializer:
-    secret = settings.session_secret or "dev-secret-change-me"
-    return URLSafeTimedSerializer(secret)
+    if not settings.session_secret:
+        raise RuntimeError("SESSION_SECRET must be set in environment")
+    return URLSafeTimedSerializer(settings.session_secret)
 
 
 def create_session_cookie(email: str) -> str:
@@ -61,17 +62,13 @@ def verify_session_cookie(cookie_value: str) -> str | None:
 
 class SessionAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if settings.dev_mode:
-            request.state.user_email = settings.allowed_email
-            return await call_next(request)
-
         if request.url.path in PUBLIC_PATHS or request.url.path.startswith("/static") or request.url.path.startswith(API_PREFIX):
             return await call_next(request)
 
         cookie = request.cookies.get(SESSION_COOKIE)
         if cookie:
             email = verify_session_cookie(cookie)
-            if email == settings.allowed_email:
+            if email and email.lower() == settings.allowed_email.lower():
                 request.state.user_email = email
                 return await call_next(request)
 
@@ -114,5 +111,7 @@ _LOGIN_TEMPLATE = Template("""\
 
 
 def render_login(error: str = "", next_url: str = "/") -> str:
-    error_html = f'<div class="error">{error}</div>' if error else ""
-    return _LOGIN_TEMPLATE.safe_substitute(error=error_html, next_url=next_url)
+    import html
+    error_html = f'<div class="error">{html.escape(error)}</div>' if error else ""
+    safe_next = html.escape(next_url)
+    return _LOGIN_TEMPLATE.safe_substitute(error=error_html, next_url=safe_next)

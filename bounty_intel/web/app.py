@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import markdown
+import nh3
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -25,9 +26,16 @@ app.add_middleware(SessionAuthMiddleware)
 
 # Starlette session middleware required by authlib for OAuth state
 from starlette.middleware.sessions import SessionMiddleware
-app.add_middleware(SessionMiddleware, secret_key=settings.session_secret or "dev-secret")
+app.add_middleware(SessionMiddleware, secret_key=settings.session_secret or "startup-will-fail")
 
 setup_oauth()
+
+# Run schema migrations (adds new columns safely)
+from bounty_intel.migration.schema import _add_missing_columns
+try:
+    _add_missing_columns()
+except Exception:
+    pass  # non-fatal if DB not ready yet
 
 # Mount API router
 from bounty_intel.web.api import router as api_router
@@ -47,6 +55,12 @@ def _render(request: Request, template: str, context: dict) -> HTMLResponse:
     return templates.TemplateResponse(request, template, context)
 
 
+def _safe_markdown(text: str) -> str:
+    """Render markdown to HTML and sanitize to prevent XSS."""
+    raw_html = markdown.markdown(text or "", extensions=["fenced_code", "tables", "codehilite"])
+    return nh3.clean(raw_html)
+
+
 def _platform_url(platform: str, platform_id: str) -> str:
     """Generate direct link to the report on the platform."""
     if not platform_id:
@@ -56,6 +70,46 @@ def _platform_url(platform: str, platform_id: str) -> str:
     if platform == "intigriti":
         return f"https://app.intigriti.com/researcher/submissions/{platform_id}"
     return ""
+
+
+def _program_platform_url(platform: str, handle: str) -> str:
+    """Generate direct link to the program on the platform."""
+    if not handle:
+        return ""
+    if platform == "hackerone":
+        return f"https://hackerone.com/{handle}"
+    if platform == "intigriti":
+        # handles may be "company/slug" or just "slug"
+        slug = handle.split("/")[-1] if "/" in handle else handle
+        return f"https://app.intigriti.com/researcher/programs/{slug}/detail"
+    return ""
+
+
+_DOMAIN_HINTS: dict[str, str] = {
+    "bcny": "arc.net",
+    "neon_bbp": "neon.tech",
+    "lightspark_bbp": "lightspark.com",
+    "toolsforhumanity": "worldcoin.org",
+    "agentschapwegenenverkeerbugbounty": "wegenenverkeer.be",
+    "quadcodebugbounty": "iqoption.com",
+    "capitalcom": "capital.com",
+    "virginmedia": "virginmedia.com",
+}
+
+
+def _company_logo_url(program) -> str:
+    """Return Google Favicon URL for the company."""
+    import re
+    handle = getattr(program, "platform_handle", "") or ""
+    name = getattr(program, "company_name", "") or ""
+    key = re.sub(r"[^a-z0-9]", "", (handle.split("/")[0] if "/" in handle else handle or name).lower())
+    domain = _DOMAIN_HINTS.get(key)
+    if not domain:
+        clean = re.sub(r"(bugbounty|_bbp|bbp)", "", key)
+        domain = f"{clean}.com" if clean else ""
+    if not domain:
+        return ""
+    return f"https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://{domain}&size=64"
 
 
 def _badge_class(disposition: str) -> str:
@@ -160,7 +214,7 @@ async def google_callback(request: Request):
     userinfo = token.get("userinfo", {})
     email = userinfo.get("email", "")
 
-    if email != settings.allowed_email:
+    if email.lower() != settings.allowed_email.lower():
         return RedirectResponse(f"/login?error=Access+denied+for+{email}", status_code=302)
 
     next_url = request.session.pop("next_url", "/")
@@ -252,6 +306,7 @@ async def programs_list(request: Request, platform: str = "", status: str = ""):
         "status_badge": _status_badge,
         "filter_platform": platform,
         "filter_status": status,
+        "company_logo_url": _company_logo_url,
     })
 
 
@@ -289,6 +344,9 @@ async def program_detail(request: Request, program_id: int):
         "severity_badge": _severity_badge,
         "status_badge": _status_badge,
         "days_ago": _days_ago,
+        "platform_url": _platform_url,
+        "program_platform_url": _program_platform_url,
+        "company_logo_url": _company_logo_url,
     })
 
 
@@ -313,15 +371,9 @@ async def finding_detail(request: Request, finding_id: int):
         return HTMLResponse("Finding not found", status_code=404)
 
     program = finding.program
-    rendered_desc = markdown.markdown(
-        finding.description or "", extensions=["fenced_code", "tables"]
-    )
-    rendered_steps = markdown.markdown(
-        finding.steps_to_reproduce or "", extensions=["fenced_code", "tables"]
-    )
-    rendered_impact = markdown.markdown(
-        finding.impact or "", extensions=["fenced_code", "tables"]
-    )
+    rendered_desc = _safe_markdown(finding.description)
+    rendered_steps = _safe_markdown(finding.steps_to_reproduce)
+    rendered_impact = _safe_markdown(finding.impact)
     session.close()
 
     return _render(request, "finding_detail.html", {
@@ -364,6 +416,7 @@ async def reports_list(request: Request):
         "status_badge": _status_badge,
         "days_ago": _days_ago,
         "platform_url": _platform_url,
+        "company_logo_url": _company_logo_url,
     })
 
 
@@ -377,10 +430,7 @@ async def report_editor(request: Request, report_id: int):
         session.close()
         return HTMLResponse("Report not found", status_code=404)
 
-    rendered_html = markdown.markdown(
-        report.markdown_body or "",
-        extensions=["fenced_code", "tables", "codehilite"],
-    )
+    rendered_html = _safe_markdown(report.markdown_body)
 
     program = report.program
     evidence = report.evidence_files
@@ -395,6 +445,7 @@ async def report_editor(request: Request, report_id: int):
         "severity_badge": _severity_badge,
         "status_badge": _status_badge,
         "platform_url": _platform_url,
+        "company_logo_url": _company_logo_url,
     })
 
 
@@ -407,8 +458,105 @@ async def update_report(request: Request, report_id: int):
     
     service.update_report(report_id, markdown_body=body)
 
-    rendered = markdown.markdown(str(body), extensions=["fenced_code", "tables"])
+    rendered = _safe_markdown(str(body))
     return HTMLResponse(rendered)
+
+
+# ── Delete actions ───────────────────────────────────────────
+@app.post("/findings/{finding_id}/delete", response_class=HTMLResponse)
+async def delete_finding_web(request: Request, finding_id: int):
+    from bounty_intel.db import Finding, SubmissionReport, get_session
+    from sqlalchemy import select
+
+    session = get_session()
+    finding = session.get(Finding, finding_id)
+    if not finding:
+        session.close()
+        return HTMLResponse("Not found", status_code=404)
+    # Block if linked to submitted report
+    linked = session.scalar(
+        select(SubmissionReport).where(
+            SubmissionReport.finding_id == finding_id,
+            SubmissionReport.status.in_(["submitted", "accepted"]),
+        )
+    )
+    if linked:
+        session.close()
+        return RedirectResponse(f"/findings/{finding_id}?error=Cannot+delete:+linked+to+submitted+report", status_code=303)
+    program_id = finding.program_id
+    session.delete(finding)
+    session.commit()
+    session.close()
+    return RedirectResponse(f"/programs/{program_id}", status_code=303)
+
+
+@app.post("/reports/{report_id}/delete", response_class=HTMLResponse)
+async def delete_report_web(request: Request, report_id: int):
+    from bounty_intel.db import SubmissionReport, get_session
+
+    session = get_session()
+    report = session.get(SubmissionReport, report_id)
+    if not report:
+        session.close()
+        return HTMLResponse("Not found", status_code=404)
+    if report.status in ("submitted", "accepted"):
+        session.close()
+        return RedirectResponse(f"/reports/{report_id}?error=Cannot+delete+submitted+report", status_code=303)
+    session.delete(report)
+    session.commit()
+    session.close()
+    return RedirectResponse("/reports", status_code=303)
+
+
+@app.post("/programs/{program_id}/delete", response_class=HTMLResponse)
+async def delete_program_web(request: Request, program_id: int):
+    from bounty_intel.db import (Program, Finding, SubmissionReport, Submission,
+                                  Engagement, Payout, AIEvaluation, EvidenceFile, get_session)
+    from sqlalchemy import select
+
+    form = await request.form()
+    force = form.get("force") == "1"
+
+    session = get_session()
+    program = session.get(Program, program_id)
+    if not program:
+        session.close()
+        return HTMLResponse("Not found", status_code=404)
+
+    # Block if there are active/triaged submissions (real platform state)
+    active_subs = [s for s in session.scalars(
+        select(Submission).where(Submission.program_id == program_id)
+    ).all() if s.disposition in ("resolved", "accepted", "triaged", "new")]
+    if active_subs and not force:
+        session.close()
+        return RedirectResponse(f"/programs/{program_id}?error=Has+active+submissions", status_code=303)
+
+    # Cascade delete via SQL (order matters for FK constraints)
+    from sqlalchemy import delete
+
+    # Submissions children first
+    sub_ids = [s.id for s in session.scalars(select(Submission).where(Submission.program_id == program_id)).all()]
+    if sub_ids:
+        session.execute(delete(Payout).where(Payout.submission_id.in_(sub_ids)))
+        session.execute(delete(AIEvaluation).where(AIEvaluation.submission_id.in_(sub_ids)))
+
+    # Evidence files (finding + report)
+    finding_ids = [f.id for f in session.scalars(select(Finding).where(Finding.program_id == program_id)).all()]
+    report_ids = [r.id for r in session.scalars(select(SubmissionReport).where(SubmissionReport.program_id == program_id)).all()]
+    if finding_ids:
+        session.execute(delete(EvidenceFile).where(EvidenceFile.finding_id.in_(finding_ids)))
+    if report_ids:
+        session.execute(delete(EvidenceFile).where(EvidenceFile.report_id.in_(report_ids)))
+
+    # Main tables
+    session.execute(delete(Submission).where(Submission.program_id == program_id))
+    session.execute(delete(SubmissionReport).where(SubmissionReport.program_id == program_id))
+    session.execute(delete(Finding).where(Finding.program_id == program_id))
+    session.execute(delete(Engagement).where(Engagement.program_id == program_id))
+    session.delete(program)
+    session.commit()
+    session.close()
+    return RedirectResponse("/programs", status_code=303)
 
 
 @app.post("/reports/{report_id}/promote", response_class=HTMLResponse)
@@ -519,6 +667,7 @@ async def submissions_list(request: Request):
         "badge_class": _badge_class,
         "severity_badge": _severity_badge,
         "days_ago": _days_ago,
+        "company_logo_url": _company_logo_url,
     })
 
 

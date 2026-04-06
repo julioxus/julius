@@ -12,7 +12,10 @@
     {% for r in reports %}
     <div class="pipeline-card">
       <a href="/reports/{{ r.id }}" style="text-decoration:none;color:inherit">
-        <div class="title">{{ r.title[:40] }}{% if r.title|length > 40 %}...{% endif %}</div>
+        <div class="title" style="display:flex;align-items:center;gap:0.4rem">
+          {% if r.program %}{% set logo = company_logo_url(r.program) %}{% if logo %}<img src="{{ logo }}" alt="" class="company-logo company-logo-sm" onerror="this.style.display='none'">{% endif %}{% endif %}
+          {{ r.title[:40] }}{% if r.title|length > 40 %}...{% endif %}
+        </div>
         <div class="meta">
           <span class="badge {{ severity_badge(r.severity or '') }}">{{ r.severity }}</span>
           {{ r.platform }}

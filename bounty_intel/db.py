@@ -47,6 +47,7 @@ class Program(Base):
     scope = Column(JSONB, default=dict)
     oos_rules = Column(JSONB, default=dict)
     tech_stack = Column(ARRAY(Text), default=list)
+    logo_url = Column(Text, default="")
     notes = Column(Text, default="")
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

@@ -16,6 +16,15 @@
   </div>
 </div>
 
+<!-- Actions -->
+<div style="display:flex;gap:0.5rem;margin-bottom:1.5rem">
+  {% if finding.status not in ('submitted', 'accepted') %}
+  <form method="post" action="/findings/{{ finding.id }}/delete" onsubmit="return confirm('Delete this finding?')">
+    <button class="btn btn-danger btn-sm" type="submit">Delete Finding</button>
+  </form>
+  {% endif %}
+</div>
+
 <div class="grid" style="grid-template-columns: 1fr 1fr 1fr 1fr; margin-bottom: 1.5rem">
   <div class="card">
     <div class="card-label">Vulnerability Class</div>

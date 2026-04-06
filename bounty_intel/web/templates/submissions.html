@@ -33,7 +33,7 @@
   <tbody>
     {% for e in pending %}
     <tr class="expandable">
-      <td>{{ e.sub.program.company_name[:16] if e.sub.program else '?' }}</td>
+      <td style="white-space:nowrap">{% if e.sub.program %}{% set logo = company_logo_url(e.sub.program) %}{% if logo %}<img src="{{ logo }}" alt="" class="company-logo company-logo-sm" onerror="this.style.display='none'"> {% endif %}{{ e.sub.program.company_name[:16] }}{% else %}?{% endif %}</td>
       <td>{{ e.sub.title[:40] }}{% if e.sub.title and e.sub.title|length > 40 %}...{% endif %}</td>
       <td><span class="badge {{ severity_badge(e.sub.severity or '') }}">{{ e.sub.severity }}</span></td>
       <td><span class="badge {{ badge_class(e.sub.disposition) }}">{{ e.sub.disposition }}</span></td>
@@ -86,7 +86,7 @@
   <tbody>
     {% for e in closed_paid %}
     <tr>
-      <td>{{ e.sub.program.company_name[:16] if e.sub.program else '?' }}</td>
+      <td style="white-space:nowrap">{% if e.sub.program %}{% set logo = company_logo_url(e.sub.program) %}{% if logo %}<img src="{{ logo }}" alt="" class="company-logo company-logo-sm" onerror="this.style.display='none'"> {% endif %}{{ e.sub.program.company_name[:16] }}{% else %}?{% endif %}</td>
       <td>{{ e.sub.title[:40] }}</td>
       <td><span class="badge {{ severity_badge(e.sub.severity or '') }}">{{ e.sub.severity }}</span></td>
       <td class="mono green">{{ e.sub.listed_currency }} {{ e.sub.listed_bounty }}</td>
@@ -107,7 +107,7 @@
   <tbody>
     {% for e in closed_rejected %}
     <tr class="expandable">
-      <td>{{ e.sub.program.company_name[:16] if e.sub.program else '?' }}</td>
+      <td style="white-space:nowrap">{% if e.sub.program %}{% set logo = company_logo_url(e.sub.program) %}{% if logo %}<img src="{{ logo }}" alt="" class="company-logo company-logo-sm" onerror="this.style.display='none'"> {% endif %}{{ e.sub.program.company_name[:16] }}{% else %}?{% endif %}</td>
       <td>{{ e.sub.title[:40] }}</td>
       <td><span class="badge {{ severity_badge(e.sub.severity or '') }}">{{ e.sub.severity }}</span></td>
       <td><span class="badge {{ badge_class(e.sub.disposition) }}">{{ e.sub.disposition }}</span></td>

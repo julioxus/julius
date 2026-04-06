@@ -27,7 +27,10 @@
   <tbody>
     {% for p in programs %}
     <tr onclick="location.href='/programs/{{ p.program.id }}'" style="cursor:pointer">
-      <td><strong>{{ p.program.company_name }}</strong></td>
+      <td style="display:flex;align-items:center;gap:0.5rem">
+        {% set logo = company_logo_url(p.program) %}{% if logo %}<img src="{{ logo }}" alt="" class="company-logo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="logo-fallback" style="display:none">{{ p.program.company_name[0] }}</span>{% else %}<span class="logo-fallback" style="display:flex">{{ p.program.company_name[0] }}</span>{% endif %}
+        <strong>{{ p.program.company_name }}</strong>
+      </td>
       <td><span class="badge badge-{% if p.program.platform == 'hackerone' %}blue{% else %}purple{% endif %}">{{ p.program.platform }}</span></td>
       <td><span class="badge {{ status_badge(p.program.status) }}">{{ p.program.status }}</span></td>
       <td>{{ p.program.bounty_type or 'bounty' }}</td>

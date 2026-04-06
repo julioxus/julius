@@ -90,15 +90,18 @@ def _extract_severity(report: dict) -> str:
     return "Medium"
 
 
-def _extract_program(report: dict) -> tuple[str, str]:
-    """Returns (handle, company_name)."""
+def _extract_program(report: dict) -> tuple[str, str, str]:
+    """Returns (handle, company_name, logo_url)."""
     team = report.get("relationships", {}).get("program", {}).get("data", {})
     if not team:
         team = report.get("relationships", {}).get("team", {}).get("data", {})
     attrs = team.get("attributes", {}) if team else {}
     handle = attrs.get("handle", "unknown")
     name = attrs.get("name", handle)
-    return handle, name
+    # HackerOne provides profile_picture_urls with multiple sizes
+    pics = attrs.get("profile_picture_urls", {})
+    logo_url = pics.get("medium", "") or pics.get("small", "") or ""
+    return handle, name, logo_url
 
 
 def _extract_bounties(report: dict) -> list[dict]:
@@ -173,7 +176,7 @@ def sync(since: datetime | None = None) -> dict:
 
     for report in reports:
         attrs = report.get("attributes", {})
-        handle, company = _extract_program(report)
+        handle, company, logo_url = _extract_program(report)
         severity = _extract_severity(report)
         state = attrs.get("state", "new")
         disposition = H1_STATE_TO_DISPOSITION.get(state, "unknown")
@@ -191,10 +194,14 @@ def sync(since: datetime | None = None) -> dict:
             platform="hackerone",
             platform_handle=handle,
             company_name=company,
+            logo_url=logo_url,
         )
         prog_stmt = prog_stmt.on_conflict_do_update(
             constraint="uq_program_platform_handle",
-            set_={"company_name": prog_stmt.excluded.company_name},
+            set_={
+                "company_name": prog_stmt.excluded.company_name,
+                "logo_url": prog_stmt.excluded.logo_url,
+            },
         )
         program_id = session.execute(prog_stmt.returning(Program.id)).scalar_one()
 

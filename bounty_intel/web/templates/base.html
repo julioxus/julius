@@ -142,6 +142,13 @@
   .yellow { color: var(--yellow); } .blue { color: var(--blue); }
   .accent { color: var(--accent); } .muted { color: var(--muted); }
 
+  /* Company logos */
+  .company-logo { width:24px; height:24px; border-radius:6px; object-fit:contain; background:var(--surface); flex-shrink:0; }
+  .company-logo-sm { width:18px; height:18px; border-radius:4px; vertical-align:middle; }
+  .company-logo-lg { width:32px; height:32px; border-radius:8px; }
+  .logo-fallback { width:24px; height:24px; border-radius:6px; background:var(--accent); color:#fff; font-weight:700; font-size:0.75rem; align-items:center; justify-content:center; flex-shrink:0; text-transform:uppercase; }
+  .logo-fallback-lg { width:32px; height:32px; font-size:1rem; border-radius:8px; }
+
   {% block extra_css %}{% endblock %}
 </style>
 </head>

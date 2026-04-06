@@ -107,6 +107,11 @@ class BountyIntelClient:
     def update_finding(self, finding_id: int, **kwargs) -> None:
         self._patch(f"/api/v1/findings/{finding_id}", kwargs)
 
+    def delete_finding(self, finding_id: int) -> None:
+        resp = requests.delete(f"{self.api_url}/api/v1/findings/{finding_id}",
+                               headers=self._headers(), timeout=30)
+        resp.raise_for_status()
+
     # ------------------------------------------------------------------
     # Reports
     # ------------------------------------------------------------------
@@ -127,9 +132,28 @@ class BountyIntelClient:
     def update_report(self, report_id: int, **kwargs) -> None:
         self._patch(f"/api/v1/reports/{report_id}", kwargs)
 
+    def delete_report(self, report_id: int) -> None:
+        resp = requests.delete(f"{self.api_url}/api/v1/reports/{report_id}",
+                               headers=self._headers(), timeout=30)
+        resp.raise_for_status()
+
     def mark_report_submitted(self, report_id: int, platform_submission_id: str) -> None:
         self._post(f"/api/v1/reports/{report_id}/submit",
                    {"platform_submission_id": platform_submission_id})
+
+    # ------------------------------------------------------------------
+    # Submissions
+    # ------------------------------------------------------------------
+    def get_submissions(self, *, platform: str | None = None, disposition: str | None = None,
+                        program_id: int | None = None) -> list[dict]:
+        params = {}
+        if platform:
+            params["platform"] = platform
+        if disposition:
+            params["disposition"] = disposition
+        if program_id:
+            params["program_id"] = program_id
+        return self._get("/api/v1/submissions", params)
 
     # ------------------------------------------------------------------
     # Hunt Memory

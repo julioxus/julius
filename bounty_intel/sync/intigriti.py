@@ -213,15 +213,32 @@ def sync(since: datetime | None = None) -> dict:
         listed_bounty = bounty.get("value", 0) or 0
         listed_currency = bounty.get("currency", "EUR")
 
+        # Build logo URL from programLogoId
+        # Format: "public_bucket_{company_uuid}-{logo_uuid}"
+        # URL:    https://app.intigriti.com/cdn/company/{company_uuid}/logo/{logo_uuid}
+        logo_url = ""
+        logo_id = sub.get("programLogoId", "")
+        if logo_id and logo_id.startswith("public_bucket_"):
+            parts = logo_id[len("public_bucket_"):].split("-")
+            if len(parts) == 10:
+                # Two UUIDs, 5 segments each: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+                uuid1 = "-".join(parts[:5])
+                uuid2 = "-".join(parts[5:])
+                logo_url = f"https://app.intigriti.com/cdn/company/{uuid1}/logo/{uuid2}"
+
         # Upsert program
         prog_stmt = pg_insert(Program).values(
             platform="intigriti",
             platform_handle=handle,
             company_name=company,
+            logo_url=logo_url,
         )
         prog_stmt = prog_stmt.on_conflict_do_update(
             constraint="uq_program_platform_handle",
-            set_={"company_name": prog_stmt.excluded.company_name},
+            set_={
+                "company_name": prog_stmt.excluded.company_name,
+                "logo_url": prog_stmt.excluded.logo_url,
+            },
         )
         program_id = session.execute(prog_stmt.returning(Program.id)).scalar_one()
 

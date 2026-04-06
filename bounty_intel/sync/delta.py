@@ -8,7 +8,7 @@ from bounty_intel import service
 from bounty_intel.sync import hackerone, intigriti
 
 
-def sync_all(sources: list[str] | None = None) -> dict:
+def sync_all(sources: list[str] | None = None, force: bool = False) -> dict:
     """Run delta sync for specified sources (or all).
 
     Returns per-source stats dict.
@@ -20,8 +20,12 @@ def sync_all(sources: list[str] | None = None) -> dict:
 
     for source in sources:
         print(f"\n--- Syncing {source} ---")
-        state = service.get_sync_state(source)
-        since = state.last_submission_updated if state else None
+        if force:
+            since = None
+            print("  Force mode: ignoring watermark")
+        else:
+            state = service.get_sync_state(source)
+            since = state.last_submission_updated if state else None
 
         if since:
             print(f"  Watermark: {since.isoformat()}")

@@ -405,7 +405,12 @@ def import_submission_reports(base_dir: Path):
 
 
 def sync_report_statuses():
-    """Cross-reference submission_reports with submissions to update report status.
+    """Cross-reference submission_reports with submissions to update status and link bidirectionally.
+
+    Matches by title similarity across programs with the same company name (handles
+    duplicate program entries from import vs sync).  Links both directions:
+      - report.platform_submission_id ← submission.platform_id
+      - submission.report_id ← report.id
 
     Maps platform disposition → report status:
       - resolved/accepted → accepted
@@ -413,8 +418,12 @@ def sync_report_statuses():
       - triaged → submitted (confirmed by platform)
       - new/needs_more_info → submitted (pending)
     """
-    session = get_session()
+    from difflib import SequenceMatcher
+
     from sqlalchemy import select
+    from sqlalchemy.orm import joinedload
+
+    session = get_session()
 
     DISPOSITION_TO_STATUS = {
         "resolved": "accepted",
@@ -429,99 +438,164 @@ def sync_report_statuses():
         "needs_more_info": "submitted",
     }
 
-    # Find all submission_reports and try to match with submissions
-    reports = session.scalars(select(SubmissionReport)).all()
-    updated = 0
+    # Load all programs, reports, and submissions
+    programs = {p.id: p for p in session.scalars(select(Program)).all()}
+    reports = session.scalars(
+        select(SubmissionReport).options(joinedload(SubmissionReport.submission))
+    ).unique().all()
+    all_subs = session.scalars(
+        select(Submission).options(joinedload(Submission.program))
+    ).unique().all()
 
-    for report in reports:
-        # Try to match by title similarity with submissions from same program
-        subs = session.scalars(
-            select(Submission).where(Submission.program_id == report.program_id)
-        ).all()
+    # Build company-name lookup: normalize company → [program_ids]
+    company_to_pids: dict[str, set[int]] = {}
+    for p in programs.values():
+        key = p.company_name.lower().strip()
+        company_to_pids.setdefault(key, set()).add(p.id)
+
+    # For each program, find all sibling program_ids (same company, any handle)
+    pid_siblings: dict[int, set[int]] = {}
+    for p in programs.values():
+        key = p.company_name.lower().strip()
+        pid_siblings[p.id] = company_to_pids.get(key, {p.id})
+
+    # Index submissions by program_id for fast lookup
+    subs_by_pid: dict[int, list] = {}
+    for sub in all_subs:
+        subs_by_pid.setdefault(sub.program_id, []).append(sub)
+
+    updated = 0
+    linked = 0
+    used_sub_ids: set[int] = set()
+
+    # Sort reports by ID for deterministic matching
+    for report in sorted(reports, key=lambda r: r.id):
+        # Already linked?
+        if report.submission is not None:
+            used_sub_ids.add(report.submission.id)
+            continue
+
+        # Collect candidate submissions from same company (across program duplicates)
+        r_prog = programs.get(report.program_id)
+        if not r_prog:
+            continue
+        sibling_pids = pid_siblings.get(report.program_id, {report.program_id})
+
+        candidates = []
+        for pid in sibling_pids:
+            candidates.extend(subs_by_pid.get(pid, []))
+
+        # Also try fuzzy company match for H1 programs (company names differ)
+        if report.platform == "hackerone" and r_prog:
+            r_company = r_prog.company_name.lower().strip()
+            for cname, pids in company_to_pids.items():
+                if cname != r_company and SequenceMatcher(None, r_company, cname).ratio() > 0.5:
+                    for pid in pids:
+                        candidates.extend(subs_by_pid.get(pid, []))
 
         best_match = None
-        best_score = 0
+        best_score = 0.0
 
-        for sub in subs:
+        for sub in candidates:
+            if sub.id in used_sub_ids:
+                continue
+            if sub.platform != report.platform:
+                continue
             if not sub.title or not report.title:
                 continue
-            # Simple word overlap matching
-            report_words = set(report.title.lower().split()[:8])
-            sub_words = set(sub.title.lower().split()[:8])
-            if not report_words or not sub_words:
-                continue
-            overlap = len(report_words & sub_words) / max(len(report_words), len(sub_words))
-            if overlap > best_score and overlap > 0.3:
-                best_score = overlap
+            score = SequenceMatcher(None, report.title.lower(), sub.title.lower()).ratio()
+            if score > best_score and score > 0.55:
+                best_score = score
                 best_match = sub
 
         if best_match:
+            # Bidirectional link
+            report.platform_submission_id = best_match.platform_id
+            best_match.report_id = report.id
+            used_sub_ids.add(best_match.id)
+            linked += 1
+
+            # Update report status from disposition
             new_status = DISPOSITION_TO_STATUS.get(best_match.disposition, "submitted")
             if report.status != new_status:
                 report.status = new_status
-                report.platform_submission_id = best_match.platform_id
                 updated += 1
 
     session.commit()
     session.close()
-    print(f"  Updated {updated} report statuses from platform data")
+    print(f"  Linked {linked} reports ↔ submissions, updated {updated} report statuses")
+
+
+def _normalize_company(name: str) -> str:
+    """Normalize company name for dedup: lowercase, strip common suffixes and noise."""
+    import re
+    n = name.lower().strip()
+    # Remove common suffixes that differ between import and sync
+    for suffix in ("bugbounty", "bug bounty", "_bbp", " bbp", " o2"):
+        n = n.replace(suffix, "")
+    n = re.sub(r"[^a-z0-9]", "", n)  # keep only alphanumeric
+    return n
 
 
 def deduplicate_programs():
-    """Merge duplicate programs that have the same company_name + platform but different handles."""
+    """Merge duplicate programs with same normalized company_name + platform."""
     session = get_session()
 
-    # Find duplicates: same (platform, company_name) with multiple handles
     from sqlalchemy import func, select
-    dupes = session.execute(
-        select(Program.platform, Program.company_name, func.count(Program.id).label("cnt"))
-        .group_by(Program.platform, Program.company_name)
-        .having(func.count(Program.id) > 1)
-    ).all()
+
+    # Load all programs and group by (platform, normalized_company)
+    all_programs = session.scalars(select(Program)).all()
+    groups: dict[tuple[str, str], list] = {}
+    for p in all_programs:
+        key = (p.platform, _normalize_company(p.company_name))
+        groups.setdefault(key, []).append(p)
+
+    # Pre-compute submission counts (before any mutations)
+    sub_counts: dict[int, int] = {}
+    for p in all_programs:
+        sub_counts[p.id] = session.scalar(
+            select(func.count(Submission.id)).where(Submission.program_id == p.id)
+        ) or 0
 
     merged = 0
-    for platform, company, cnt in dupes:
-        programs = session.scalars(
-            select(Program)
-            .where(Program.platform == platform, Program.company_name == company)
-            .order_by(Program.id)
-        ).all()
+    for (platform, norm_name), programs in groups.items():
+        if len(programs) < 2:
+            continue
+        programs.sort(key=lambda p: p.id)
 
         # Keep the one with most submissions (or lowest ID as tiebreaker)
-        keep = programs[0]
-        max_subs = 0
-        for p in programs:
-            sub_count = session.scalar(
-                select(func.count(Submission.id)).where(Submission.program_id == p.id)
-            ) or 0
-            if sub_count > max_subs:
-                max_subs = sub_count
-                keep = p
+        keep = max(programs, key=lambda p: (sub_counts.get(p.id, 0), -p.id))
 
         # Merge others into keep
-        for p in programs:
-            if p.id == keep.id:
-                continue
-            # Re-parent submissions
-            session.execute(
-                Submission.__table__.update().where(Submission.program_id == p.id).values(program_id=keep.id)
-            )
-            # Re-parent findings
-            session.execute(
-                Finding.__table__.update().where(Finding.program_id == p.id).values(program_id=keep.id)
-            )
-            # Re-parent reports
-            session.execute(
-                SubmissionReport.__table__.update().where(SubmissionReport.program_id == p.id).values(program_id=keep.id)
-            )
-            # Merge notes
-            if p.notes and p.notes not in (keep.notes or ""):
-                keep.notes = (keep.notes or "") + "\n" + p.notes
-            # Merge tech_stack
-            if p.tech_stack:
-                keep.tech_stack = list(set((keep.tech_stack or []) + p.tech_stack))
-            # Delete the duplicate
-            session.delete(p)
+        with session.no_autoflush:
+            for p in programs:
+                if p.id == keep.id:
+                    continue
+                # Re-parent submissions
+                session.execute(
+                    Submission.__table__.update().where(Submission.program_id == p.id).values(program_id=keep.id)
+                )
+                # Re-parent findings
+                session.execute(
+                    Finding.__table__.update().where(Finding.program_id == p.id).values(program_id=keep.id)
+                )
+                # Re-parent reports
+                session.execute(
+                    SubmissionReport.__table__.update().where(SubmissionReport.program_id == p.id).values(program_id=keep.id)
+                )
+                # Re-parent engagements
+                from bounty_intel.db import Engagement
+                session.execute(
+                    Engagement.__table__.update().where(Engagement.program_id == p.id).values(program_id=keep.id)
+                )
+                # Merge notes
+                if p.notes and p.notes not in (keep.notes or ""):
+                    keep.notes = (keep.notes or "") + "\n" + p.notes
+                # Merge tech_stack
+                if p.tech_stack:
+                    keep.tech_stack = list(set((keep.tech_stack or []) + p.tech_stack))
+                # Delete the duplicate
+                session.delete(p)
             merged += 1
 
     session.commit()

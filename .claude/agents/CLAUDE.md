@@ -2,6 +2,36 @@
 
 7 agents: security testing orchestration + execution + validation + deep exploitation + bug bounty automation + threat intelligence.
 
+## Database Persistence (ALL AGENTS — MANDATORY)
+
+**The Bounty Intel database is the single source of truth.** All findings, reports, and activity MUST be persisted via `BountyIntelClient` (HTTP API). Local `outputs/` files are **ephemeral working artifacts only** — they exist during testing but are NOT the canonical record.
+
+### When to persist to DB
+
+| Event | API Call | Who |
+|-------|----------|-----|
+| New finding discovered | `api.save_finding(program_id=..., title=..., vuln_class=..., severity=..., description=..., impact=..., steps_to_reproduce=..., poc_code=..., poc_output=...)` | Orchestrator (Phase 5) or Executor (if standalone) |
+| Finding validated/rejected | `api.update_finding(finding_id, status="validated")` or delete | Validator |
+| Report drafted | `api.create_report(program_id=..., platform=..., title=..., markdown_body=...)` | Orchestrator or bounty skill |
+| Hunt attempt (success or fail) | `api.record_hunt(target=..., vuln_class=..., success=..., severity=..., technique=...)` | Orchestrator (Phase 5) |
+| Activity log | `api.log_activity(engagement_id, action, details)` | All agents |
+
+### Client initialization
+
+```python
+from bounty_intel.client import BountyIntelClient
+api = BountyIntelClient()  # reads BOUNTY_INTEL_API_URL + BOUNTY_INTEL_API_KEY from .env
+```
+
+### Rules
+
+1. **Every confirmed finding → `api.save_finding()`** before the engagement ends
+2. **Every submission report → `api.create_report()`** — never leave reports only on local disk
+3. **Local `outputs/` files are temporary** — they support testing workflow but the DB is canonical
+4. **Read existing data before creating** — check `api.get_findings(program_id=...)` to avoid duplicates
+5. **Never mark a report as "submitted" without a real platform_submission_id**
+6. **Exception: DefectDojo engagements** keep local `outputs/defectdojo-*/findings/` reports as the working format (reviewed locally before DD API upload). These do NOT go through Bounty Intel DB.
+
 ## Artifact Discipline (ALL AGENTS)
 
 **NEVER write any file to the project root or current working directory.** Every file an agent produces — tool output, downloads, scripts, certificates, keys, tickets, captures, dumps, reports, evidence — MUST go into a structured `outputs/` subtree.

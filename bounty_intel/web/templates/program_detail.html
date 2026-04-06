@@ -2,12 +2,46 @@
 {% block title %}{{ program.company_name }} - Bounty Intel{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>{{ program.company_name }}</h1>
+  <h1 style="display:flex;align-items:center;gap:0.6rem">
+    {% set logo = company_logo_url(program) %}{% if logo %}<img src="{{ logo }}" alt="" class="company-logo company-logo-lg" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="logo-fallback logo-fallback-lg" style="display:none">{{ program.company_name[0] }}</span>{% else %}<span class="logo-fallback logo-fallback-lg" style="display:flex">{{ program.company_name[0] }}</span>{% endif %}
+    {{ program.company_name }}
+  </h1>
   <div class="actions">
     <span class="badge {{ status_badge(program.status) }}">{{ program.status }}</span>
-    <span class="badge badge-{% if program.platform == 'hackerone' %}blue{% else %}purple{% endif %}">{{ program.platform }}</span>
+    <a href="{{ program_platform_url(program.platform, program.platform_handle) }}" target="_blank"
+       class="badge badge-{% if program.platform == 'hackerone' %}blue{% else %}purple{% endif %}"
+       style="text-decoration:none">{{ program.platform }} &nearr;</a>
   </div>
 </div>
+
+{% set has_submitted = submissions|selectattr('disposition', 'in', ['resolved','accepted','triaged','new'])|list|length > 0 %}
+{% if not has_submitted %}
+<div style="margin-bottom:1rem">
+  <button class="btn btn-danger btn-sm" onclick="document.getElementById('delete-program-modal').style.display='flex'">Delete Program</button>
+</div>
+<div id="delete-program-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center">
+  <div class="card" style="width:480px;max-width:90vw">
+    <h3 style="color:var(--red);margin-bottom:0.5rem">Delete {{ program.company_name }}?</h3>
+    <div class="muted" style="margin-bottom:1rem;line-height:1.5">
+      This will permanently delete:
+      <ul style="margin:0.5rem 0">
+        {% if findings %}<li><strong>{{ findings|length }} findings</strong></li>{% endif %}
+        {% if reports %}<li><strong>{{ reports|length }} reports</strong></li>{% endif %}
+        {% if submissions %}<li><strong>{{ submissions|length }} submissions</strong></li>{% endif %}
+      </ul>
+      {% if not findings and not reports and not submissions %}No data to delete.{% endif %}
+      <strong>This cannot be undone.</strong>
+    </div>
+    <form method="post" action="/programs/{{ program.id }}/delete">
+      <input type="hidden" name="force" value="1">
+      <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+        <button type="button" class="btn" onclick="document.getElementById('delete-program-modal').style.display='none'">Cancel</button>
+        <button type="submit" class="btn btn-danger">Delete Everything</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
 
 {% if program.notes %}
 <div class="insight-box">{{ program.notes }}</div>
@@ -97,7 +131,7 @@
 <!-- Submissions Tab -->
 <div id="tab-submissions" class="tab-content" style="display:none">
 <table>
-  <thead><tr><th>ID</th><th>Title</th><th>Severity</th><th>Disposition</th><th>Bounty</th></tr></thead>
+  <thead><tr><th>ID</th><th>Title</th><th>Severity</th><th>Disposition</th><th>Bounty</th><th></th></tr></thead>
   <tbody>
     {% for s in submissions %}
     <tr>
@@ -106,6 +140,7 @@
       <td><span class="badge {{ severity_badge(s.severity or '') }}">{{ s.severity }}</span></td>
       <td><span class="badge {{ badge_class(s.disposition) }}">{{ s.disposition }}</span></td>
       <td class="mono">{{ s.listed_currency }} {{ s.listed_bounty }}</td>
+      <td><a href="{{ platform_url(s.platform, s.platform_id) }}" target="_blank" class="btn btn-sm" style="text-decoration:none">View &nearr;</a></td>
     </tr>
     {% endfor %}
   </tbody>

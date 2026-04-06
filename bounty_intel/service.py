@@ -129,12 +129,12 @@ def update_finding(finding_id: int, **kwargs) -> None:
 # ── Reports ──────────────────────────────────────────────────
 def list_reports(status: str | None = None, program_id: int | None = None) -> list[SubmissionReport]:
     with get_session() as s:
-        q = select(SubmissionReport)
+        q = select(SubmissionReport).options(joinedload(SubmissionReport.program))
         if status:
             q = q.where(SubmissionReport.status == status)
         if program_id:
             q = q.where(SubmissionReport.program_id == program_id)
-        return list(s.scalars(q.order_by(SubmissionReport.updated_at.desc())).all())
+        return list(s.scalars(q.order_by(SubmissionReport.updated_at.desc())).unique().all())
 
 
 def create_report(**kwargs) -> int:

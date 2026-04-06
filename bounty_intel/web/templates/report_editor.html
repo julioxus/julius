@@ -4,14 +4,18 @@
 <div class="page-header">
   <div>
     <div class="muted" style="font-size:0.85rem;margin-bottom:0.3rem">
-      {% if program %}<a href="/programs/{{ program.id }}" style="color:var(--accent);text-decoration:none">{{ program.company_name }}</a> &rsaquo;{% endif %}
+      {% if program %}{% set logo = company_logo_url(program) %}{% if logo %}<img src="{{ logo }}" alt="" class="company-logo company-logo-sm" onerror="this.style.display='none'" style="vertical-align:middle;margin-right:0.3rem">{% endif %}<a href="/programs/{{ program.id }}" style="color:var(--accent);text-decoration:none">{{ program.company_name }}</a> &rsaquo;{% endif %}
       {{ report.report_slug }}
     </div>
     <h1>{{ report.title }}</h1>
   </div>
   <div class="actions">
     <span class="badge {{ severity_badge(report.severity or '') }}" style="font-size:0.9rem;padding:4px 12px">{{ report.severity }}</span>
+    {% if report.status == 'submitted' and not report.platform_submission_id %}
+    <span class="badge badge-orange" style="font-size:0.9rem;padding:4px 12px">unlinked</span>
+    {% else %}
     <span class="badge {{ status_badge(report.status) }}" style="font-size:0.9rem;padding:4px 12px">{{ report.status }}</span>
+    {% endif %}
     <span class="badge badge-{% if report.platform == 'hackerone' %}blue{% else %}purple{% endif %}" style="font-size:0.9rem;padding:4px 12px">{{ report.platform }}</span>
   </div>
 </div>
@@ -56,6 +60,12 @@
   <button class="btn btn-primary" onclick="document.getElementById('link-modal').style.display='flex'">
     Link to Platform
   </button>
+  {% endif %}
+
+  {% if report.status not in ('submitted', 'accepted') %}
+  <form method="post" action="/reports/{{ report.id }}/delete" style="display:inline;margin-left:auto" onsubmit="return confirm('Delete this report?')">
+    <button class="btn btn-danger" type="submit">Delete Report</button>
+  </form>
   {% endif %}
 </div>
 
