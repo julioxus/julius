@@ -2,37 +2,132 @@
 {% block title %}Submissions - Bounty Intel{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Submission Tracker ({{ submissions|length }})</h1>
+  <h1>Submission Tracker</h1>
 </div>
 
-<div class="filters">
-  <select class="filter-select" onchange="location.href='?disposition='+this.value+'&platform={{ filter_platform }}'">
-    <option value="">All Dispositions</option>
-    {% for d in ['new','triaged','needs_more_info','resolved','duplicate','informative','not_applicable'] %}
-    <option value="{{ d }}" {% if filter_disposition == d %}selected{% endif %}>{{ d }}</option>
-    {% endfor %}
-  </select>
-  <select class="filter-select" onchange="location.href='?disposition={{ filter_disposition }}&platform='+this.value">
-    <option value="">All Platforms</option>
-    <option value="hackerone" {% if filter_platform == 'hackerone' %}selected{% endif %}>HackerOne</option>
-    <option value="intigriti" {% if filter_platform == 'intigriti' %}selected{% endif %}>Intigriti</option>
-  </select>
+<!-- KPI row -->
+<div class="grid" style="grid-template-columns: repeat(4, 1fr)">
+  <div class="card">
+    <div class="card-value accent mono">{{ pending|length }}</div>
+    <div class="card-label">Pending</div>
+  </div>
+  <div class="card">
+    <div class="card-value green mono">&euro;{{ "%.0f"|format(total_pending_ev) }}</div>
+    <div class="card-label">Total Pending EV</div>
+  </div>
+  <div class="card">
+    <div class="card-value green mono">{{ closed_paid|length }}</div>
+    <div class="card-label">Paid</div>
+  </div>
+  <div class="card">
+    <div class="card-value red mono">{{ closed_rejected|length }}</div>
+    <div class="card-label">Rejected</div>
+  </div>
 </div>
 
+<!-- TOP PENDING -->
+<h2>Top Pending Submissions (by Expected Value)</h2>
+{% if pending %}
 <table>
-  <thead><tr><th>ID</th><th>Program</th><th>Title</th><th>Severity</th><th>Disposition</th><th>Bounty</th><th>Submitted</th></tr></thead>
+  <thead><tr><th>Program</th><th>Title</th><th>Sev</th><th>Status</th><th>Prob</th><th>EV</th><th>AI Assessment</th><th>Resolve</th></tr></thead>
   <tbody>
-    {% for s in submissions %}
-    <tr>
-      <td class="mono muted">{{ s.platform_id[:12] }}</td>
-      <td>{{ s.program.company_name[:20] if s.program else '?' }}</td>
-      <td>{{ s.title[:45] }}{% if s.title and s.title|length > 45 %}...{% endif %}</td>
-      <td><span class="badge {{ severity_badge(s.severity or '') }}">{{ s.severity or '?' }}</span></td>
-      <td><span class="badge {{ badge_class(s.disposition) }}">{{ s.disposition }}</span></td>
-      <td class="mono">{{ s.listed_currency }} {{ s.listed_bounty }}</td>
-      <td class="muted">{{ days_ago(s.created_at) }}</td>
+    {% for e in pending %}
+    <tr class="expandable">
+      <td>{{ e.sub.program.company_name[:16] if e.sub.program else '?' }}</td>
+      <td>{{ e.sub.title[:40] }}{% if e.sub.title and e.sub.title|length > 40 %}...{% endif %}</td>
+      <td><span class="badge {{ severity_badge(e.sub.severity or '') }}">{{ e.sub.severity }}</span></td>
+      <td><span class="badge {{ badge_class(e.sub.disposition) }}">{{ e.sub.disposition }}</span></td>
+      <td class="mono {% if e.prob > 0.5 %}green{% elif e.prob > 0.3 %}yellow{% else %}red{% endif %}">{{ "%.0f"|format(e.prob * 100) }}%</td>
+      <td class="mono accent" style="font-weight:600">&euro;{{ "%.0f"|format(e.ev) }}</td>
+      <td>
+        {% if e.ai_outcome %}<span class="badge {% if e.ai_outcome == 'accepted' %}badge-green{% elif e.ai_outcome == 'duplicate' %}badge-gray{% else %}badge-yellow{% endif %}">{{ e.ai_outcome }}</span>{% endif %}
+        {% if e.prob_source == 'ai' %}<span class="badge badge-purple">AI</span>{% endif %}
+      </td>
+      <td class="muted">{{ e.est_resolve[:10] if e.est_resolve else '?' }}{% if e.overdue %} <span class="badge badge-red">overdue</span>{% endif %}</td>
+    </tr>
+    <tr class="detail-row">
+      <td colspan="8">
+        <div class="detail-panel">
+          {% if e.ai_reasoning %}
+          <div style="font-style:italic;margin-bottom:0.8rem;line-height:1.5">{{ e.ai_reasoning }}</div>
+          {% endif %}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+            {% if e.ai_strengths %}
+            <div>
+              <div class="muted" style="font-size:0.8rem;margin-bottom:0.3rem">STRENGTHS</div>
+              {% for s in e.ai_strengths %}<div class="green" style="font-size:0.85rem">+ {{ s }}</div>{% endfor %}
+            </div>
+            {% endif %}
+            {% if e.ai_weaknesses %}
+            <div>
+              <div class="muted" style="font-size:0.8rem;margin-bottom:0.3rem">WEAKNESSES</div>
+              {% for w in e.ai_weaknesses %}<div class="red" style="font-size:0.85rem">- {{ w }}</div>{% endfor %}
+            </div>
+            {% endif %}
+          </div>
+          <div class="muted" style="margin-top:0.5rem;font-size:0.8rem">
+            {{ e.sub.platform }} #{{ e.sub.platform_id }} &middot; submitted {{ days_ago(e.sub.created_at) }} &middot; {{ e.sub.listed_currency }} {{ e.sub.listed_bounty }}
+          </div>
+        </div>
+      </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+{% else %}
+<div class="insight-box">No pending submissions.</div>
+{% endif %}
+
+<!-- PAID (what worked) -->
+{% if closed_paid %}
+<h2>Paid Submissions — What Worked</h2>
+<table>
+  <thead><tr><th>Program</th><th>Title</th><th>Severity</th><th>Bounty</th><th>Why It Worked</th></tr></thead>
+  <tbody>
+    {% for e in closed_paid %}
+    <tr>
+      <td>{{ e.sub.program.company_name[:16] if e.sub.program else '?' }}</td>
+      <td>{{ e.sub.title[:40] }}</td>
+      <td><span class="badge {{ severity_badge(e.sub.severity or '') }}">{{ e.sub.severity }}</span></td>
+      <td class="mono green">{{ e.sub.listed_currency }} {{ e.sub.listed_bounty }}</td>
+      <td class="muted" style="font-size:0.85rem">
+        {% if e.ai_strengths %}{{ e.ai_strengths|join(', ') }}{% else %}Accepted by program{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<!-- REJECTED (lessons learned) -->
+{% if closed_rejected %}
+<h2>Rejected Submissions — Lessons Learned</h2>
+<table>
+  <thead><tr><th>Program</th><th>Title</th><th>Severity</th><th>Reason</th><th>Why It Failed</th></tr></thead>
+  <tbody>
+    {% for e in closed_rejected %}
+    <tr class="expandable">
+      <td>{{ e.sub.program.company_name[:16] if e.sub.program else '?' }}</td>
+      <td>{{ e.sub.title[:40] }}</td>
+      <td><span class="badge {{ severity_badge(e.sub.severity or '') }}">{{ e.sub.severity }}</span></td>
+      <td><span class="badge {{ badge_class(e.sub.disposition) }}">{{ e.sub.disposition }}</span></td>
+      <td class="muted" style="font-size:0.85rem">
+        {% if e.ai_weaknesses %}{{ e.ai_weaknesses|join(', ') }}
+        {% elif e.sub.disposition == 'duplicate' %}Another researcher reported first
+        {% elif e.sub.disposition == 'informative' %}Insufficient impact or theoretical-only
+        {% elif e.sub.disposition == 'not_applicable' %}Out of scope or not a vulnerability
+        {% else %}Closed by program{% endif %}
+      </td>
+    </tr>
+    {% if e.ai_reasoning %}
+    <tr class="detail-row">
+      <td colspan="5">
+        <div class="detail-panel" style="font-style:italic">{{ e.ai_reasoning }}</div>
+      </td>
+    </tr>
+    {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 {% endblock %}
