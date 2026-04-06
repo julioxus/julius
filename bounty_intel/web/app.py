@@ -996,8 +996,9 @@ async def evidence_redirect(evidence_id: int):
             from bounty_intel.evidence.uploader import generate_signed_url
             url = generate_signed_url(gcs_path)
             return RedirectResponse(url)
-        except Exception:
-            pass  # Fall through to local file serving
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Signed URL failed for %s: %s", gcs_path, exc)
 
     # Fall back to serving local file
     if local_path:
