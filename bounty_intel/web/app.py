@@ -977,14 +977,34 @@ async def trigger_intigriti_sync(request: Request):
 @app.get("/evidence/{evidence_id}")
 async def evidence_redirect(evidence_id: int):
     from bounty_intel.db import EvidenceFile, get_session
-    from bounty_intel.evidence.uploader import generate_signed_url
 
     session = get_session()
     ef = session.get(EvidenceFile, evidence_id)
-    session.close()
-
     if not ef:
+        session.close()
         return HTMLResponse("Not found", status_code=404)
 
-    url = generate_signed_url(ef.gcs_path)
-    return RedirectResponse(url)
+    gcs_path = ef.gcs_path or ""
+    local_path = ef.local_path or ""
+    content_type = ef.content_type or "application/octet-stream"
+    filename = ef.filename or "evidence"
+    session.close()
+
+    # Try GCS signed URL first
+    if gcs_path:
+        try:
+            from bounty_intel.evidence.uploader import generate_signed_url
+            url = generate_signed_url(gcs_path)
+            return RedirectResponse(url)
+        except Exception:
+            pass  # Fall through to local file serving
+
+    # Fall back to serving local file
+    if local_path:
+        from pathlib import Path
+        p = Path(local_path)
+        if p.exists():
+            from fastapi.responses import FileResponse
+            return FileResponse(p, media_type=content_type, filename=filename)
+
+    return HTMLResponse("Evidence file not available", status_code=404)
