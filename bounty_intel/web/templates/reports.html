@@ -10,16 +10,26 @@
   <div class="pipeline-col">
     <h3>{{ status|upper }} <span class="badge {% if status == 'accepted' %}badge-green{% elif status == 'rejected' %}badge-red{% elif status == 'submitted' %}badge-purple{% else %}badge-gray{% endif %}">{{ reports|length }}</span></h3>
     {% for r in reports %}
-    <a href="/reports/{{ r.id }}" class="pipeline-card" style="display:block;text-decoration:none;color:inherit">
-      <div class="title">{{ r.title[:40] }}{% if r.title|length > 40 %}...{% endif %}</div>
-      <div class="meta">
-        <span class="badge {{ severity_badge(r.severity or '') }}">{{ r.severity }}</span>
-        {{ r.platform }}
-        {% if r.report_slug %}&middot; {{ r.report_slug }}{% endif %}
-        {% if r.platform_submission_id %}<br><span class="muted" style="font-size:0.7rem">#{{ r.platform_submission_id }}</span>{% endif %}
-        <br>{{ days_ago(r.updated_at) }}
+    <div class="pipeline-card">
+      <a href="/reports/{{ r.id }}" style="text-decoration:none;color:inherit">
+        <div class="title">{{ r.title[:40] }}{% if r.title|length > 40 %}...{% endif %}</div>
+        <div class="meta">
+          <span class="badge {{ severity_badge(r.severity or '') }}">{{ r.severity }}</span>
+          {{ r.platform }}
+          {% if r.report_slug %}&middot; {{ r.report_slug }}{% endif %}
+        </div>
+      </a>
+      {% if r.platform_submission_id %}
+      {% set purl = platform_url(r.platform, r.platform_submission_id) %}
+      <div style="margin-top:0.4rem;display:flex;align-items:center;gap:0.4rem">
+        <span class="mono muted" style="font-size:0.7rem">#{{ r.platform_submission_id }}</span>
+        {% if purl %}
+        <a href="{{ purl }}" target="_blank" style="font-size:0.7rem;color:var(--accent);text-decoration:none">&rarr; platform</a>
+        {% endif %}
       </div>
-    </a>
+      {% endif %}
+      <div class="muted" style="font-size:0.7rem;margin-top:0.2rem">{{ days_ago(r.updated_at) }}</div>
+    </div>
     {% endfor %}
     {% if not reports %}
     <div class="muted" style="font-size:0.85rem;padding:0.5rem">No reports</div>

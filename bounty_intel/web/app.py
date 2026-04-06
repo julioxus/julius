@@ -47,6 +47,17 @@ def _render(request: Request, template: str, context: dict) -> HTMLResponse:
     return templates.TemplateResponse(request, template, context)
 
 
+def _platform_url(platform: str, platform_id: str) -> str:
+    """Generate direct link to the report on the platform."""
+    if not platform_id:
+        return ""
+    if platform == "hackerone":
+        return f"https://hackerone.com/reports/{platform_id}"
+    if platform == "intigriti":
+        return f"https://app.intigriti.com/researcher/submissions/{platform_id}"
+    return ""
+
+
 def _badge_class(disposition: str) -> str:
     return {
         "new": "badge-blue", "triaged": "badge-green", "accepted": "badge-green",
@@ -326,6 +337,7 @@ async def reports_list(request: Request):
         "severity_badge": _severity_badge,
         "status_badge": _status_badge,
         "days_ago": _days_ago,
+        "platform_url": _platform_url,
     })
 
 
@@ -356,6 +368,7 @@ async def report_editor(request: Request, report_id: int):
         "evidence": evidence,
         "severity_badge": _severity_badge,
         "status_badge": _status_badge,
+        "platform_url": _platform_url,
     })
 
 
@@ -387,12 +400,37 @@ async def promote_report(request: Request, report_id: int):
 @app.post("/reports/{report_id}/submit", response_class=HTMLResponse)
 async def submit_report(request: Request, report_id: int):
     from bounty_intel import service
+    from bounty_intel.db import SubmissionReport, Submission, get_session
+    from sqlalchemy import select
 
     form = await request.form()
-    platform_id = form.get("platform_submission_id", "")
-    
+    platform_id = form.get("platform_submission_id", "").strip()
+
+    if not platform_id:
+        return RedirectResponse(f"/reports/{report_id}?error=Platform+ID+required", status_code=303)
+
+    session = get_session()
+    report = session.get(SubmissionReport, report_id)
+    if not report:
+        session.close()
+        return HTMLResponse("Report not found", status_code=404)
+
+    # Mark report as submitted
     service.mark_report_submitted(report_id, platform_id)
 
+    # Try to link with existing submission record (from platform sync)
+    sub = session.scalar(
+        select(Submission).where(
+            Submission.platform == report.platform,
+            Submission.platform_id == platform_id,
+        )
+    )
+    if sub:
+        # Cross-link: submission.report_id → this report
+        sub.report_id = report_id
+        session.commit()
+
+    session.close()
     return RedirectResponse(f"/reports/{report_id}", status_code=303)
 
 

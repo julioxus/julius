@@ -2,45 +2,101 @@
 {% block title %}{{ report.report_slug }} - Bounty Intel{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>{{ report.report_slug }}</h1>
+  <div>
+    <div class="muted" style="font-size:0.85rem;margin-bottom:0.3rem">
+      {% if program %}<a href="/programs/{{ program.id }}" style="color:var(--accent);text-decoration:none">{{ program.company_name }}</a> &rsaquo;{% endif %}
+      {{ report.report_slug }}
+    </div>
+    <h1>{{ report.title }}</h1>
+  </div>
   <div class="actions">
-    <span class="badge {{ severity_badge(report.severity or '') }}">{{ report.severity }}</span>
-    <span class="badge {{ status_badge(report.status) }}">{{ report.status }}</span>
-    <span class="badge badge-{% if report.platform == 'hackerone' %}blue{% else %}purple{% endif %}">{{ report.platform }}</span>
-
-    {% if report.status == 'draft' %}
-    <form method="post" action="/reports/{{ report.id }}/promote" style="display:inline">
-      <input type="hidden" name="status" value="ready">
-      <button class="btn btn-primary btn-sm" type="submit">Mark Ready</button>
-    </form>
-    {% elif report.status == 'ready' %}
-    <form method="post" action="/reports/{{ report.id }}/submit" style="display:inline">
-      <input type="text" name="platform_submission_id" placeholder="Platform ID after submit" class="filter-select" style="width:200px">
-      <button class="btn btn-primary btn-sm" type="submit">Approve & Submit</button>
-    </form>
-    {% endif %}
-
-    {% if report.status not in ('submitted', 'accepted') %}
-    <form method="post" action="/reports/{{ report.id }}/promote" style="display:inline">
-      <input type="hidden" name="status" value="draft">
-      <button class="btn btn-danger btn-sm" type="submit">Back to Draft</button>
-    </form>
-    {% endif %}
+    <span class="badge {{ severity_badge(report.severity or '') }}" style="font-size:0.9rem;padding:4px 12px">{{ report.severity }}</span>
+    <span class="badge {{ status_badge(report.status) }}" style="font-size:0.9rem;padding:4px 12px">{{ report.status }}</span>
+    <span class="badge badge-{% if report.platform == 'hackerone' %}blue{% else %}purple{% endif %}" style="font-size:0.9rem;padding:4px 12px">{{ report.platform }}</span>
   </div>
 </div>
 
+<!-- Platform link (if submitted) -->
 {% if report.platform_submission_id %}
-<div class="insight-box good">
-  Submitted as <strong>{{ report.platform_submission_id }}</strong> on {{ report.submitted_at.strftime('%Y-%m-%d %H:%M') if report.submitted_at else '?' }}
+{% set purl = platform_url(report.platform, report.platform_submission_id) %}
+<div class="insight-box good" style="display:flex;justify-content:space-between;align-items:center">
+  <div>
+    <strong>Submitted</strong> as <code>#{{ report.platform_submission_id }}</code>
+    {% if report.submitted_at %} on {{ report.submitted_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+  </div>
+  {% if purl %}
+  <a href="{{ purl }}" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none">
+    View on {{ report.platform|capitalize }} &rarr;
+  </a>
+  {% endif %}
 </div>
 {% endif %}
 
-{% if report.validation_result %}
-<div class="insight-box {% if report.validation_result.get('passed') %}good{% else %}warn{% endif %}">
-  <strong>Validation:</strong> {{ report.validation_result | tojson }}
+<!-- Actions -->
+<div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;flex-wrap:wrap">
+  {% if report.status == 'draft' %}
+  <form method="post" action="/reports/{{ report.id }}/promote" style="display:inline">
+    <input type="hidden" name="status" value="ready">
+    <button class="btn btn-primary" type="submit">Mark Ready</button>
+  </form>
+  {% elif report.status == 'ready' %}
+  <button class="btn btn-primary" onclick="document.getElementById('submit-modal').style.display='flex'">
+    Approve &amp; Submit
+  </button>
+  {% endif %}
+
+  {% if report.status not in ('submitted', 'accepted', 'rejected') %}
+  <form method="post" action="/reports/{{ report.id }}/promote" style="display:inline">
+    <input type="hidden" name="status" value="draft">
+    <button class="btn btn-danger" type="submit">Back to Draft</button>
+  </form>
+  {% endif %}
+
+  {% if report.platform_submission_id %}
+  {% set purl = platform_url(report.platform, report.platform_submission_id) %}
+  {% if purl and not report.status in ('submitted',) %}
+  <a href="{{ purl }}" target="_blank" class="btn" style="text-decoration:none">Open on {{ report.platform|capitalize }}</a>
+  {% endif %}
+  {% endif %}
+</div>
+
+<!-- Submit modal -->
+<div id="submit-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center">
+  <div class="card" style="width:480px;max-width:90vw">
+    <h3 style="margin-bottom:1rem">Submit to {{ report.platform|capitalize }}</h3>
+    <div class="muted" style="font-size:0.85rem;margin-bottom:1rem">
+      After submitting the report on
+      {% if report.platform == 'hackerone' %}
+      <a href="https://hackerone.com" target="_blank" style="color:var(--accent)">HackerOne</a>,
+      {% else %}
+      <a href="https://app.intigriti.com" target="_blank" style="color:var(--accent)">Intigriti</a>,
+      {% endif %}
+      paste the submission ID below to link it.
+    </div>
+    <form method="post" action="/reports/{{ report.id }}/submit">
+      <input type="text" name="platform_submission_id"
+        placeholder="{% if report.platform == 'hackerone' %}e.g. 3651585{% else %}e.g. abc123-def456{% endif %}"
+        style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:0.7rem 1rem;font-size:0.95rem;font-family:monospace;margin-bottom:1rem"
+        required autofocus>
+      <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+        <button type="button" class="btn" onclick="document.getElementById('submit-modal').style.display='none'">Cancel</button>
+        <button type="submit" class="btn btn-primary">Link &amp; Mark Submitted</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if report.validation_result and report.validation_result != {} %}
+<div class="insight-box {% if report.validation_result.get('passed') %}good{% else %}warn{% endif %}" style="margin-bottom:1.5rem">
+  <strong>Validation:</strong>
+  {% for check, result in (report.validation_result.get('checks') or {}).items() %}
+  <span class="badge {% if result == 'pass' %}badge-green{% else %}badge-red{% endif %}" style="margin-right:0.3rem">{{ check }}: {{ result }}</span>
+  {% endfor %}
+  {% if report.validation_result.get('notes') %}<div class="muted" style="margin-top:0.3rem">{{ report.validation_result.notes }}</div>{% endif %}
 </div>
 {% endif %}
 
+<!-- Split pane editor -->
 <div class="split-pane">
   <div>
     <textarea

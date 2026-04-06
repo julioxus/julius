@@ -14,8 +14,16 @@ from decimal import Decimal
 from pathlib import Path
 
 from bounty_intel.config import settings
-from bounty_intel.db import Payout, Program, Submission, get_session
+from bounty_intel.db import Payout, Program, Submission, SubmissionReport, get_session
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+DISPOSITION_TO_REPORT_STATUS = {
+    "resolved": "accepted", "accepted": "accepted",
+    "duplicate": "rejected", "informative": "rejected",
+    "not_applicable": "rejected", "wont_fix": "rejected", "out_of_scope": "rejected",
+    "triaged": "submitted", "new": "submitted",
+}
 
 BASE_URL = "https://app.intigriti.com"
 SUBMISSIONS_EP = "/api/core/researcher/submissions"
@@ -272,6 +280,16 @@ def sync(since: datetime | None = None) -> dict:
                             status=pstatus,
                             paid_date=paid_date,
                         ))
+
+        # Sync report status if linked
+        sub_id_str = str(sub.get("id", ""))
+        linked_report = session.scalar(
+            select(SubmissionReport).where(SubmissionReport.platform_submission_id == sub_id_str)
+        )
+        if linked_report:
+            new_status = DISPOSITION_TO_REPORT_STATUS.get(disposition, linked_report.status)
+            if linked_report.status != new_status:
+                linked_report.status = new_status
 
         upserted += 1
         if last_updated and (max_updated is None or last_updated > max_updated):
