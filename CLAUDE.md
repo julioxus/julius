@@ -86,23 +86,26 @@ This repo provides Claude Code skills and agents for security testing, bug bount
 
 **CRITICAL**: When asked about bug bounty programs, engagements, findings, recon data, attack surface, submissions, or any engagement context, **always query the Bounty Intel API first**. This is the single source of truth for all operational data. The legacy `outputs/` directory has been removed — all data lives in the database.
 
-**How to access** (from skills/agents):
-```python
-from bounty_intel.client import BountyIntelClient
-db = BountyIntelClient()  # reads BOUNTY_INTEL_API_URL + BOUNTY_INTEL_API_KEY from .env
+**How to access** — Use `bounty_*` MCP tools (auto-loaded via `.mcp.json`):
+- `bounty_list_programs(platform="hackerone")` — list programs
+- `bounty_get_program(program_id)` — full detail with scope/OOS
+- `bounty_get_recon(program_id)` — subdomains, endpoints, API specs
+- `bounty_get_attack_surface(program_id)` — scope coverage stats
+- `bounty_get_findings(program_id=...)` — list findings
+- `bounty_get_finding(finding_id)` — full finding detail
+- `bounty_search_findings(query="SSRF")` — text search across findings
+- `bounty_save_finding(program_id=..., title=..., ...)` — save new finding
+- `bounty_get_finding_evidence(finding_id)` — PoC files, HTTP logs
+- `bounty_upload_evidence(finding_id, filename, local_path=...)` — attach evidence
+- `bounty_get_submissions(program_id=...)` — platform-synced status
+- `bounty_get_payouts(program_id=...)` — bounty payments
+- `bounty_suggest_attacks(tech_stack=["react", "graphql"])` — attack suggestions
+- `bounty_forecast()` — earnings projection
+- `bounty_get_stats()` — DB summary
 
-# Program context
-programs = db.list_programs(platform="hackerone")
-recon = db.get_program_recon(program_id)        # subdomains, endpoints, API specs
-surface = db.get_attack_surface(program_id)      # scope, coverage, stats
-findings = db.get_findings(program_id=program_id) # discovered vulnerabilities
-evidence = db.get_finding_evidence(finding_id)   # PoC files, HTTP logs
-submissions = db.get_submissions(program_id=program_id) # platform-synced status
-hunt = db.suggest_attacks(tech_stack=["react", "graphql"]) # attack suggestions
-forecast = db.forecast()                          # earnings projection
-```
+**Fallback** (for Python scripts): `from bounty_intel.client import BountyIntelClient`
 
-**Available endpoints**: `/api/v1/programs`, `/programs/{id}/recon`, `/programs/{id}/attack-surface`, `/findings`, `/findings/{id}/evidence`, `/submissions`, `/reports`, `/hunt`, `/hunt/suggest`, `/forecast`, `/stats`, `/sync`, `/activity`, `/evaluations`
+**Available endpoints**: `/api/v1/programs`, `/programs/{id}/detail`, `/programs/{id}/recon`, `/programs/{id}/attack-surface`, `/engagements`, `/findings`, `/findings/{id}`, `/findings/search`, `/findings/{id}/evidence`, `/findings/{id}/evidence/upload`, `/evidence/{id}/url`, `/submissions`, `/payouts`, `/reports`, `/reports/{id}`, `/reports/{id}/evidence`, `/hunt`, `/hunt/suggest`, `/forecast`, `/stats`, `/sync`, `/activity`, `/evaluations`
 
 **Dashboard**: https://bounty-dashboard-887002731862.europe-west1.run.app
 

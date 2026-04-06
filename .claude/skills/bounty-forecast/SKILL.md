@@ -25,12 +25,10 @@ This:
 
 ### Step 2: AI Triager Evaluation (done by Claude Code inline)
 
-Read engagement context from DB:
-```python
-from bounty_intel.client import BountyIntelClient
-db = BountyIntelClient()
-submissions = db.get_submissions(disposition="new") + db.get_submissions(disposition="triaged")
-```
+Read engagement context via MCP tools:
+- `bounty_get_submissions(disposition="new")` + `bounty_get_submissions(disposition="triaged")` — get pending submissions
+- `bounty_get_payouts()` — get historical payout data
+- `bounty_get_stats()` — overall DB statistics
 
 For each **pending** submission, evaluate from a **senior triager's cognitive perspective** considering:
 

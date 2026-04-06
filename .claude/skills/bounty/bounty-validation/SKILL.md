@@ -9,33 +9,21 @@ Shared validation, compliance, and quality logic for security testing platforms.
 
 ## Database Integration
 
-Validation results are persisted via the **Bounty Intel REST API**:
+Validation results are persisted via the **Bounty Intel MCP tools** (`bounty_*`):
 
-```python
-from bounty_intel.client import BountyIntelClient
-api = BountyIntelClient()  # reads BOUNTY_INTEL_API_URL + BOUNTY_INTEL_API_KEY from .env
+### Read findings:
+- `bounty_get_findings(program_id=..., status="discovered")` — get findings awaiting validation
+- `bounty_get_finding(finding_id=...)` — full detail with PoC, steps, evidence
 
-# Read findings from API
-findings = api.get_findings(program_id=program_id, status="discovered")
+### After validation — update status:
+- `bounty_update_finding(finding_id=..., status="validated")` — passed all checks
+- `bounty_update_finding(finding_id=..., status="building_block", is_building_block=True, building_block_notes="Rejected: informative gate — config disclosure without exploit chain")` — rejected
 
-# After validation, update finding status
-api.update_finding(finding_id, status="validated")  # or "rejected"
+### Update report with validation result:
+- `bounty_update_report(report_id=..., status="validated")`
 
-# If a submission report exists, write validation result
-api.update_report(report_id, validation_result={
-    "passed": True,
-    "checks": {"oos_check": "pass", "informative_gate": "pass", "browser_security": "pass",
-               "evidence_quality": "pass", "cvss_consistency": "pass"},
-    "notes": "All checks passed"
-}, status="validated")
-
-# Rejected findings → mark as building block
-api.update_finding(finding_id, status="building_block", is_building_block=True,
-    building_block_notes="Rejected: informative gate — config disclosure without exploit chain")
-
-# Activity logging
-api.log_activity(engagement_id, "validation_completed", {"finding_id": finding_id, "result": "pass"})
-```
+### Activity logging:
+- `bounty_log_activity(action="validation_completed", engagement_id=..., details={"finding_id": ..., "result": "pass"})`
 
 ## PoC Validation (CRITICAL)
 

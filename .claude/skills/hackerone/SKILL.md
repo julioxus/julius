@@ -9,52 +9,33 @@ Automates HackerOne workflows: scope parsing → mobile app acquisition → reco
 
 ## Database Integration (MANDATORY)
 
-All engagement data is persisted via the **Bounty Intel REST API** — no direct database access. The API is served by the Cloud Run dashboard. Skills only need `BOUNTY_INTEL_API_KEY` in `.env`.
-
-```python
-from bounty_intel.client import BountyIntelClient
-api = BountyIntelClient()  # reads BOUNTY_INTEL_API_URL + BOUNTY_INTEL_API_KEY from .env
-```
+All engagement data is persisted via the **Bounty Intel MCP tools** (`bounty_*`). These tools are auto-loaded when Claude starts in this project — no imports or env setup needed.
 
 ### At engagement start:
-```python
-program_id = api.upsert_program(platform="hackerone", handle=program_handle, company_name=company_name, scope=scope_json, tech_stack=detected_tech)
-engagement_id = api.create_engagement(program_id, notes="Initial scope assessment", recon_data=recon_results, attack_surface=surface_map)
-api.log_activity(engagement_id, "engagement_started", {"program": program_handle, "assets": len(targets)})
-```
+- `bounty_upsert_program(platform="hackerone", handle=..., company_name=..., scope=..., tech_stack=[...])`
+- `bounty_create_engagement(program_id=..., notes="Initial scope assessment")`
+- `bounty_update_engagement(engagement_id=..., recon_data=..., attack_surface=...)`
+- `bounty_log_activity(action="engagement_started", engagement_id=..., details={...})`
 
 ### After each finding:
-```python
-finding_id = api.save_finding(
-    engagement_id=engagement_id, program_id=program_id,
-    title="SSRF via redirect parameter", vuln_class="SSRF", severity="High",
-    cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N",
-    description="Full markdown description...", steps_to_reproduce="Steps...",
-    impact="Impact statement...", poc_code="python3 poc script...", poc_output="timestamped output..."
-)
-api.record_hunt(target="target.com", vuln_class="SSRF", success=True, technique="Open redirect → SSRF", tech_stack=["Flask"], platform="hackerone")
-api.log_activity(engagement_id, "finding_created", {"finding_id": finding_id, "title": "SSRF via redirect"})
-```
+- `bounty_save_finding(program_id=..., engagement_id=..., title=..., vuln_class=..., severity=..., cvss_vector=..., description=..., steps_to_reproduce=..., impact=..., poc_code=..., poc_output=...)`
+- `bounty_record_hunt(target=..., vuln_class=..., success=True, technique=..., tech_stack=[...], platform="hackerone")`
+- `bounty_upload_evidence(finding_id=..., filename=..., local_path=...)` for screenshots/videos
+- `bounty_log_activity(action="finding_created", engagement_id=..., details={...})`
 
-### For submission reports (replaces writing H1_*.md files):
-```python
-report_id = api.create_report(
-    finding_id=finding_id, program_id=program_id, platform="hackerone",
-    report_slug="H1_HIGH_001", title="SSRF via redirect parameter",
-    severity="High", cvss_vector="CVSS:3.1/...", markdown_body=full_report_markdown
-)
-api.log_activity(engagement_id, "report_created", {"report_id": report_id, "slug": "H1_HIGH_001"})
-```
+### For building blocks:
+- `bounty_save_finding(..., is_building_block=True, building_block_notes="Chain with SSRF or OAuth token theft")`
 
-### For building blocks (findings that can't be submitted alone):
-```python
-api.save_finding(
-    engagement_id=engagement_id, program_id=program_id,
-    title="Open redirect on login callback", vuln_class="open_redirect", severity="Low",
-    is_building_block=True, building_block_notes="Chain with SSRF or OAuth token theft",
-    description="...", poc_code="...", poc_output="..."
-)
-```
+### For submission reports:
+- `bounty_create_report(program_id=..., platform="hackerone", title=..., markdown_body=..., finding_id=..., severity=..., report_slug="H1_HIGH_001")`
+- `bounty_log_activity(action="report_created", engagement_id=..., details={...})`
+
+### Context queries:
+- `bounty_get_findings(program_id=...)` — check what's already been found
+- `bounty_search_findings(query="SSRF")` — search across all findings
+- `bounty_get_program(program_id=...)` — get scope and OOS rules
+- `bounty_get_recon(program_id=...)` — get recon data
+- `bounty_suggest_attacks(tech_stack=[...])` — get attack suggestions from hunt memory
 
 ### View reports before submission (dashboard):
 Reports are reviewed at https://bounty-dashboard-887002731862.europe-west1.run.app/reports — the user approves submission from the dashboard. NEVER submit directly to HackerOne without user approval via the dashboard.
@@ -172,7 +153,7 @@ Use `tools/report_validator.py` to validate.
 
 ## Output Structure
 
-**PRIMARY**: All findings, reports, and engagement data are stored in the **Bounty Intel database** via `BountyIntelClient`. The dashboard at `https://bounty-dashboard-887002731862.europe-west1.run.app` is the operations center for reviewing and approving submissions.
+**PRIMARY**: All findings, reports, and engagement data are stored in the **Bounty Intel database** via `bounty_*` MCP tools. The dashboard at `https://bounty-dashboard-887002731862.europe-west1.run.app` is the operations center for reviewing and approving submissions.
 
 **SECONDARY** (ephemeral only): A temporary local directory `outputs/hackerone-{program}/` can be used for artifacts during active testing (tool output, temp files), but nothing should persist there long-term. All validated findings and reports MUST be saved to the database.
 
@@ -222,7 +203,7 @@ Local (ephemeral, during active testing only):
 
 ## Tools
 
-- `bounty_intel.client.BountyIntelClient` - **Primary persistence** (findings, reports, hunt memory, activity)
+- `bounty_*` MCP tools - **Primary persistence** (findings, reports, hunt memory, activity, evidence)
 - `tools/csv_parser.py` - Parse HackerOne scope CSVs
 - `tools/report_validator.py` - Validate report completeness
 - `/pentest` skill - Testing engine (invoked in sub-orchestrator mode)

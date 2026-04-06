@@ -9,44 +9,31 @@ Automates Intigriti workflows: scope parsing → mobile app acquisition → reco
 
 ## Database Integration (MANDATORY)
 
-All engagement data is persisted via the **Bounty Intel REST API** — no direct database access. Skills only need `BOUNTY_INTEL_API_KEY` in `.env`.
-
-```python
-from bounty_intel.client import BountyIntelClient
-api = BountyIntelClient()  # reads BOUNTY_INTEL_API_URL + BOUNTY_INTEL_API_KEY from .env
-```
+All engagement data is persisted via the **Bounty Intel MCP tools** (`bounty_*`). These tools are auto-loaded when Claude starts in this project — no imports or env setup needed.
 
 ### At engagement start:
-```python
-program_id = api.upsert_program(platform="intigriti", handle=f"{company_handle}/{program_handle}", company_name=company_name, scope=scope_json, tech_stack=detected_tech)
-engagement_id = api.create_engagement(program_id, notes="Initial scope assessment", recon_data=recon_results, attack_surface=surface_map)
-api.log_activity(engagement_id, "engagement_started", {"program": program_handle, "assets": len(targets)})
-```
+- `bounty_upsert_program(platform="intigriti", handle="{company}/{program}", company_name=..., scope=..., tech_stack=[...])`
+- `bounty_create_engagement(program_id=..., notes="Initial scope assessment")`
+- `bounty_update_engagement(engagement_id=..., recon_data=..., attack_surface=...)`
+- `bounty_log_activity(action="engagement_started", engagement_id=..., details={...})`
 
 ### After each finding:
-```python
-finding_id = api.save_finding(
-    engagement_id=engagement_id, program_id=program_id,
-    title="SSRF via redirect parameter", vuln_class="SSRF", severity="High",
-    cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N",
-    description="...", steps_to_reproduce="...", impact="...", poc_code="...", poc_output="..."
-)
-api.record_hunt(target="target.com", vuln_class="SSRF", success=True, technique="Open redirect → SSRF", tech_stack=["Django"], platform="intigriti")
-```
-
-### For submission reports (replaces writing INTI_*.md files):
-```python
-report_id = api.create_report(
-    finding_id=finding_id, program_id=program_id, platform="intigriti",
-    report_slug="INTI_HIGH_001", title="SSRF via redirect parameter",
-    severity="High", cvss_vector="CVSS:3.1/...", markdown_body=full_report_markdown
-)
-```
+- `bounty_save_finding(program_id=..., engagement_id=..., title=..., vuln_class=..., severity=..., cvss_vector=..., description=..., steps_to_reproduce=..., impact=..., poc_code=..., poc_output=...)`
+- `bounty_record_hunt(target=..., vuln_class=..., success=True, technique=..., tech_stack=[...], platform="intigriti")`
+- `bounty_upload_evidence(finding_id=..., filename=..., local_path=...)` for screenshots/videos
 
 ### For building blocks:
-```python
-api.save_finding(..., is_building_block=True, building_block_notes="Chain with OAuth token theft")
-```
+- `bounty_save_finding(..., is_building_block=True, building_block_notes="Chain with OAuth token theft")`
+
+### For submission reports:
+- `bounty_create_report(program_id=..., platform="intigriti", title=..., markdown_body=..., finding_id=..., severity=..., report_slug="INTI_HIGH_001")`
+
+### Context queries:
+- `bounty_get_findings(program_id=...)` — check what's already been found
+- `bounty_search_findings(query="SSRF")` — search across all findings
+- `bounty_get_program(program_id=...)` — get scope and OOS rules
+- `bounty_get_recon(program_id=...)` — get recon data
+- `bounty_suggest_attacks(tech_stack=[...])` — get attack suggestions from hunt memory
 
 ### View reports before submission:
 Reports are reviewed at https://bounty-dashboard-887002731862.europe-west1.run.app/reports — the user approves submission from the dashboard.
@@ -215,7 +202,7 @@ Use `tools/report_validator.py` to validate.
 
 ## Output Structure
 
-**PRIMARY**: All findings, reports, and engagement data stored in the **Bounty Intel database** via `BountyIntelClient`. Dashboard at `https://bounty-dashboard-887002731862.europe-west1.run.app` for review and approval.
+**PRIMARY**: All findings, reports, and engagement data stored in the **Bounty Intel database** via `bounty_*` MCP tools. Dashboard at `https://bounty-dashboard-887002731862.europe-west1.run.app` for review and approval.
 
 **SECONDARY** (ephemeral only): Temp directory during active testing.
 
@@ -268,7 +255,7 @@ See `reference/PLATFORM_GUIDE.md` for full comparison.
 
 ## Tools
 
-- `bounty_intel.client.BountyIntelClient` - **Primary persistence** (findings, reports, hunt memory, activity)
+- `bounty_*` MCP tools - **Primary persistence** (findings, reports, hunt memory, activity, evidence)
 - `tools/scope_parser.py` - Parse Intigriti scope from structured data
 - `tools/report_validator.py` - Validate report completeness
 - `/pentest` skill - Testing engine (invoked in sub-orchestrator mode)
