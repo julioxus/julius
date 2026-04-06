@@ -560,6 +560,7 @@ async def hunt_intel(request: Request):
         "vuln_stats": vuln_stats,
         "rejection_patterns": rejection_patterns,
         "success_patterns": success_patterns,
+        "badge_class": _badge_class,
     })
 
 

@@ -285,10 +285,21 @@ async def save_evaluation(data: AIEvalIn):
     return {"id": eid}
 
 
+class SyncRequest(BaseModel):
+    source: str = "all"
+    cookie: str = ""  # Intigriti session cookie (optional)
+
+
 # ── Sync ─────────────────────────────────────────────────────
 @router.post("/sync", dependencies=[Depends(verify_api_key)])
-async def api_sync(source: str = "all"):
+async def api_sync(data: SyncRequest):
+    # If Intigriti cookie provided, inject it for this sync
+    if data.cookie and data.source in ("intigriti", "all"):
+        import bounty_intel.config
+        bounty_intel.config.settings.intigriti_cookie = data.cookie
+
     from bounty_intel.sync.delta import sync_all
+    source = data.source
     sources = None if source == "all" else [source]
     results = sync_all(sources=sources)
     return results
