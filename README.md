@@ -36,7 +36,7 @@ Built on top of [Transilience AI Community Tools](https://github.com/transilienc
 
 ## Bounty Intel — Operations Center
 
-All findings, reports, and submissions are persisted in a **PostgreSQL database** served by a **FastAPI dashboard on Cloud Run**. Skills and agents use the `BountyIntelClient` HTTP client as the single source of truth — local `outputs/` files are ephemeral working artifacts only (exception: DefectDojo engagements keep local reports for review before upload).
+All operational data lives in a **PostgreSQL database** (Cloud SQL) served by a **FastAPI dashboard on Cloud Run**. Skills and agents use `BountyIntelClient` as the single source of truth — no local files.
 
 **Dashboard URL**: `https://bounty-dashboard-887002731862.europe-west1.run.app`
 
@@ -44,10 +44,14 @@ All findings, reports, and submissions are persisted in a **PostgreSQL database*
 
 | Feature | Description |
 |---------|-------------|
-| **Programs** | 34 tracked programs across Intigriti and HackerOne with company logos, platform links, and submission stats |
-| **Findings** | 209 vulnerability findings with severity, CVSS, vuln class, description, impact, and steps to reproduce |
+| **Programs** | 40 tracked programs across Intigriti and HackerOne with company logos, platform links, and submission stats |
+| **Findings** | 403 vulnerability findings with severity, CVSS, vuln class, PoC code/output, steps to reproduce |
+| **Recon Data** | Structured recon per engagement: subdomains, endpoints, API specs, live hosts, summaries (26 engagements) |
+| **Attack Surface** | Scope domains, subdomain/endpoint/host counts, coverage checklist (34 engagements) |
+| **Evidence** | 3,204 cataloged evidence files with metadata and inline preview |
 | **Report Manager** | Kanban pipeline: draft → ready → submitted → accepted/rejected. Live markdown editor with split preview |
 | **Submissions** | Synced from platform APIs (Intigriti + HackerOne). Bidirectional linking with internal reports |
+| **Activity** | 1,941 historical activity log entries from engagement missions |
 | **Forecast** | Monte Carlo earnings forecast with AI-evaluated acceptance probability per submission |
 | **Hunt Intel** | Cross-target pattern memory — what worked where, sorted by payout |
 
@@ -56,22 +60,41 @@ All findings, reports, and submissions are persisted in a **PostgreSQL database*
 ```
 Skills (/pentest, /intigriti, /hackerone)
   │
-  ├── api.save_finding()          → findings table
-  ├── api.create_report()         → submission_reports table
-  ├── api.record_hunt()           → hunt_memory table
-  └── api.log_activity()          → activity_log table
+  ├── db.save_finding()                    → findings table
+  ├── db.create_report()                   → submission_reports table
+  ├── db.record_hunt()                     → hunt_memory table
+  ├── db.log_activity()                    → activity_log table
+  ├── db.update_engagement(recon_data=...) → recon data (JSONB)
+  └── db.update_engagement(attack_surface=...)  → attack surface (JSONB)
   
 Platform Sync (Intigriti API, HackerOne API)
   │
-  └── POST /api/v1/sync           → submissions table (with payouts, dispositions)
+  └── POST /api/v1/sync           → submissions + payouts + dispositions
   
-Dashboard (web UI)
+REST API (for skills)
+  │
+  ├── GET /api/v1/programs/{id}/recon         → structured recon data
+  ├── GET /api/v1/programs/{id}/attack-surface → scope + coverage stats
+  ├── GET /api/v1/findings/{id}/evidence      → evidence file metadata
+  └── Full CRUD on programs, findings, reports, submissions, hunt memory
+
+Dashboard (web UI, 12 pages)
   │
   ├── Programs → Findings → Reports → Submissions (full drill-down)
+  ├── Program detail: 6 tabs (Findings, Building Blocks, Reports, Submissions, Recon, Attack Surface)
+  ├── Finding detail: description, PoC, evidence files with inline preview
   ├── Report editor with platform linking
-  ├── Delete actions (with protection for submitted reports)
   └── Forecast with monthly breakdown and scenario analysis
 ```
+
+### Infrastructure
+
+| Component | Details |
+|-----------|---------|
+| **Cloud SQL** | PostgreSQL, europe-west1, 12 tables |
+| **Cloud Run** | bounty-dashboard, Google OAuth + API key auth |
+| **GCS** | julius-bounty-evidence (binary evidence storage) |
+| **Secret Manager** | DB password, API keys, OAuth creds |
 
 ### Security
 
@@ -234,7 +257,7 @@ Canonical testing engine. 8 phases, 40+ attack types across 11 categories.
 |------|---------|---------|
 | **Scope Checker** | `python3 tools/scope_checker.py check <target> --scope scope.json` | Deterministic in-scope/OOS validation. Anchored suffix matching, CIDR support, OOS deny-first. |
 | **Safety Rails** | `python3 tools/safety_rails.py preflight <METHOD> <URL>` | Circuit breaker (5 failures → 300s cooldown), rate limiter (10 rps recon / 2 rps active), safe method policy. |
-| **Hunt Memory** | `api.suggest_attacks(tech_stack)` | Cross-target pattern DB. Records what worked where, sorted by payout. |
+| **Hunt Memory** | `db.suggest_attacks(tech_stack)` | Cross-target pattern DB in PostgreSQL. Records what worked where, sorted by payout. |
 | **Autopilot** | `/autopilot --mode normal` | Autonomous surface-by-surface hunt loop. 3 modes: paranoid, normal, yolo. |
 
 ---
@@ -269,25 +292,26 @@ julius/
 ├── AGENTS.md                        # Passive knowledge base (always loaded)
 ├── CLAUDE.md                        # Repository instructions
 ├── bounty_intel/                    # Bounty Intel ops center (Cloud Run app)
-│   ├── web/                         # FastAPI app + Jinja2 templates
-│   │   ├── app.py                   # Routes, middleware, helpers
-│   │   ├── api.py                   # REST API (/api/v1/*)
-│   │   ├── auth.py                  # Google OAuth2 + session middleware
-│   │   └── templates/               # Dashboard HTML templates
 │   ├── db.py                        # SQLAlchemy models (12 tables)
-│   ├── service.py                   # Business logic layer
+│   ├── service.py                   # Database service layer (CRUD)
 │   ├── client.py                    # HTTP client for skills (BountyIntelClient)
 │   ├── config.py                    # Environment config (pydantic-settings)
-│   ├── sync/                        # Platform API sync (Intigriti, HackerOne)
-│   │   ├── intigriti.py             # BFF API → submissions + logos
-│   │   ├── hackerone.py             # REST API → reports + bounties
-│   │   └── delta.py                 # Watermark management
+│   ├── cli.py                       # CLI: migrate, sync, forecast, serve, stats
+│   ├── web/                         # FastAPI dashboard (12 pages)
+│   │   ├── app.py                   # Routes, OAuth, evidence preview
+│   │   ├── api.py                   # REST API (/api/v1/* — recon, surface, evidence, CRUD)
+│   │   ├── auth.py                  # Google OAuth2 + session middleware
+│   │   └── templates/               # Jinja2 + HTMX + TailwindCSS
+│   ├── sync/                        # Platform API sync
+│   │   ├── hackerone.py             # H1 REST API → reports + bounties + dispositions
+│   │   ├── intigriti.py             # BFF API → submissions + logos + payouts
+│   │   └── delta.py                 # Watermark coordinator
 │   ├── forecast/                    # Monte Carlo earnings forecast
-│   │   ├── engine.py                # Forecast computation
+│   │   ├── engine.py                # Scoring + scenarios
 │   │   └── fx.py                    # ECB exchange rates
 │   └── migration/                   # Schema + data import
 │       ├── schema.py                # Table creation + column migrations
-│       └── import_existing.py       # Report linking, program dedup
+│       └── import_existing.py       # Full import: recon, evidence, findings, activity logs
 ├── .claude/
 │   ├── skills/                      # 50+ skills
 │   │   ├── pentest/                 # Canonical testing engine (11 categories, 186 docs)
@@ -312,10 +336,8 @@ julius/
 │   │   └── reference/
 │   └── tools/                       # env-reader.py
 ├── tools/                           # Safety tools + installers
-│   ├── scope_checker.py
-│   ├── safety_rails.py
-│   └── hunt_memory.py
-├── outputs/                         # Ephemeral engagement outputs (gitignored)
+│   ├── scope_checker.py             # Deterministic scope validation
+│   └── safety_rails.py              # Circuit breaker + rate limiter
 ├── Dockerfile                       # Cloud Run deployment
 ├── pyproject.toml                   # Python dependencies
 └── CONTRIBUTING.md
@@ -350,7 +372,7 @@ claude .
 ### Environment setup
 
 ```bash
-# Required for Bounty Intel dashboard access
+# Required for Bounty Intel API access (skills use this)
 BOUNTY_INTEL_API_URL=https://bounty-dashboard-887002731862.europe-west1.run.app
 BOUNTY_INTEL_API_KEY=<your-api-key>
 
@@ -358,9 +380,16 @@ BOUNTY_INTEL_API_KEY=<your-api-key>
 HACKERONE_USERNAME=<username>
 HACKERONE_API_TOKEN=<token>
 
+# Bounty Intel CLI (direct DB access for local admin)
+python -m bounty_intel migrate     # Create/update schema
+python -m bounty_intel sync        # Sync submissions from platforms
+python -m bounty_intel forecast    # Compute earnings forecast
+python -m bounty_intel serve       # Run dashboard locally
+python -m bounty_intel stats       # DB inventory
+
 # Optional tools
 bash tools/kali/install.sh        # Kali tools
-bash tools/playwright/install.sh   # Browser automation
+bash tools/playwright/install.sh   # Browser automation (needed for Intigriti sync)
 ```
 
 ---
