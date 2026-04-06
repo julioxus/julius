@@ -105,6 +105,15 @@ Dashboard (web UI, 12 pages)
 | **GCS** | julius-bounty-evidence (binary evidence storage) |
 | **Secret Manager** | DB password, API keys, OAuth creds |
 
+### Deployment
+
+```bash
+# Deploy dashboard to Cloud Run (must use repo root as source for Dockerfile)
+gcloud run deploy bounty-dashboard --source . --region europe-west1 --project ultra-airway-261710
+```
+
+> **Important**: Always deploy from the repo root (`--source .`), not from `bounty_intel/web/`. The Dockerfile at the root installs the full `bounty-intel` package with all dependencies.
+
 ### Security
 
 - Google OAuth2 authentication (single allowed email)
@@ -112,6 +121,7 @@ Dashboard (web UI, 12 pages)
 - Markdown rendering sanitized with `nh3` (prevents stored XSS)
 - Pydantic schemas on all PATCH endpoints (prevents mass assignment)
 - Session cookies: `httponly=True`, `secure=True`, `samesite="lax"`
+- Evidence serving: GCS signed URLs with local file fallback
 - No CORS (server-rendered, no separate frontend)
 
 ---
