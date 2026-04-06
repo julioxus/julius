@@ -79,9 +79,10 @@ def _program_platform_url(platform: str, handle: str) -> str:
     if platform == "hackerone":
         return f"https://hackerone.com/{handle}"
     if platform == "intigriti":
-        # handles may be "company/slug" or just "slug"
-        slug = handle.split("/")[-1] if "/" in handle else handle
-        return f"https://app.intigriti.com/researcher/programs/{slug}/detail"
+        # handles are "company/program" or just "slug" (needs company/slug/slug)
+        if "/" in handle:
+            return f"https://app.intigriti.com/researcher/programs/{handle}/detail"
+        return f"https://app.intigriti.com/researcher/programs/{handle}/{handle}/detail"
     return ""
 
 
