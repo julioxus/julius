@@ -7,6 +7,36 @@ description: Shared validation pipeline - PoC validation requirements, automated
 
 Shared validation, compliance, and quality logic for security testing platforms. Invoked by `/intigriti` and `/hackerone` after testing completes. Also available to `/defectdojo` for finding quality assurance before upload.
 
+## Database Integration
+
+Validation results are persisted via the **Bounty Intel REST API**:
+
+```python
+from bounty_intel.client import BountyIntelClient
+api = BountyIntelClient()  # reads BOUNTY_INTEL_API_URL + BOUNTY_INTEL_API_KEY from .env
+
+# Read findings from API
+findings = api.get_findings(program_id=program_id, status="discovered")
+
+# After validation, update finding status
+api.update_finding(finding_id, status="validated")  # or "rejected"
+
+# If a submission report exists, write validation result
+api.update_report(report_id, validation_result={
+    "passed": True,
+    "checks": {"oos_check": "pass", "informative_gate": "pass", "browser_security": "pass",
+               "evidence_quality": "pass", "cvss_consistency": "pass"},
+    "notes": "All checks passed"
+}, status="validated")
+
+# Rejected findings → mark as building block
+api.update_finding(finding_id, status="building_block", is_building_block=True,
+    building_block_notes="Rejected: informative gate — config disclosure without exploit chain")
+
+# Activity logging
+api.log_activity(engagement_id, "validation_completed", {"finding_id": finding_id, "result": "pass"})
+```
+
 ## PoC Validation (CRITICAL)
 
 **Every finding MUST have**:

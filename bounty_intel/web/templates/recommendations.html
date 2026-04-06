@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Recommendations - Bounty Intel{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Program Recommendations</h1></div>
+
+<h2>Programs by Expected Value</h2>
+<table>
+  <thead><tr><th>#</th><th>Program</th><th>Platform</th><th>Pending</th><th>Total EV</th><th>Top EV</th></tr></thead>
+  <tbody>
+    {% for name, data in program_ranking %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td><strong>{{ name }}</strong></td>
+      <td><span class="badge badge-{% if data.platform == 'hackerone' %}blue{% else %}purple{% endif %}">{{ data.platform }}</span></td>
+      <td class="mono">{{ data.count }}</td>
+      <td class="mono accent">&euro;{{ "%.0f"|format(data.total_ev) }}</td>
+      <td class="mono">&euro;{{ "%.0f"|format(data.top_ev) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Top 20 Submissions by EV</h2>
+<table>
+  <thead><tr><th>#</th><th>Prob</th><th>EV</th><th>Program</th><th>Title</th><th>Severity</th></tr></thead>
+  <tbody>
+    {% for s in ranked %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td class="mono">{{ "%.0f"|format(s.acceptance_prob * 100) }}%</td>
+      <td class="mono accent">&euro;{{ "%.0f"|format(s.expected_value_eur) }}</td>
+      <td>{{ s.program[:18] }}</td>
+      <td>{{ s.title[:40] }}{% if s.title|length > 40 %}...{% endif %}</td>
+      <td><span class="badge {{ severity_badge(s.severity) }}">{{ s.severity }}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

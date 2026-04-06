@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Settings - Bounty Intel{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Settings</h1></div>
+
+<h2>Platform Credentials</h2>
+<div class="grid">
+  <div class="card">
+    <div class="card-label">HackerOne</div>
+    <div class="card-value" style="font-size:1.2rem">
+      {% if h1_configured %}<span class="green">Configured</span>{% else %}<span class="red">Not configured</span>{% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-label">Intigriti</div>
+    <div class="card-value" style="font-size:1.2rem">
+      <span class="yellow">Cookie-based (1h TTL)</span>
+    </div>
+    <div class="card-label">Sync locally to refresh</div>
+  </div>
+</div>
+
+<h2>Last Sync</h2>
+<div class="grid">
+  <div class="card">
+    <div class="card-label">HackerOne</div>
+    <div class="card-value" style="font-size:1rem">
+      {% if h1_sync %}{{ days_ago(h1_sync.last_sync_at) }}{% else %}<span class="muted">Never</span>{% endif %}
+    </div>
+    {% if h1_sync and h1_sync.last_sync_at %}
+    <div class="card-label">{{ h1_sync.last_sync_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
+    {% endif %}
+  </div>
+  <div class="card">
+    <div class="card-label">Intigriti</div>
+    <div class="card-value" style="font-size:1rem">
+      {% if inti_sync %}{{ days_ago(inti_sync.last_sync_at) }}{% else %}<span class="muted">Never</span>{% endif %}
+    </div>
+    {% if inti_sync and inti_sync.last_sync_at %}
+    <div class="card-label">{{ inti_sync.last_sync_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<h2>Database Stats</h2>
+<div class="grid">
+  {% for key, value in stats.items() %}
+  <div class="card">
+    <div class="card-value mono" style="font-size:1.5rem">{{ value }}</div>
+    <div class="card-label">{{ key.replace('total_', '').replace('_', ' ').title() }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<h2>Actions</h2>
+<div style="display:flex;gap:0.5rem;margin-top:1rem">
+  <button class="btn btn-primary" hx-post="/sync" hx-swap="innerHTML" hx-target="#sync-result">
+    Sync HackerOne Now
+  </button>
+  <span id="sync-result"></span>
+</div>
+{% endblock %}

@@ -7,11 +7,56 @@ description: Intigriti bug bounty automation - parses program scope from user-pr
 
 Automates Intigriti workflows: scope parsing → mobile app acquisition → recon → testing via /pentest → PoC validation → submission reports.
 
+## Database Integration (MANDATORY)
+
+All engagement data is persisted via the **Bounty Intel REST API** — no direct database access. Skills only need `BOUNTY_INTEL_API_KEY` in `.env`.
+
+```python
+from bounty_intel.client import BountyIntelClient
+api = BountyIntelClient()  # reads BOUNTY_INTEL_API_URL + BOUNTY_INTEL_API_KEY from .env
+```
+
+### At engagement start:
+```python
+program_id = api.upsert_program(platform="intigriti", handle=f"{company_handle}/{program_handle}", company_name=company_name, scope=scope_json, tech_stack=detected_tech)
+engagement_id = api.create_engagement(program_id, notes="Initial scope assessment", recon_data=recon_results, attack_surface=surface_map)
+api.log_activity(engagement_id, "engagement_started", {"program": program_handle, "assets": len(targets)})
+```
+
+### After each finding:
+```python
+finding_id = api.save_finding(
+    engagement_id=engagement_id, program_id=program_id,
+    title="SSRF via redirect parameter", vuln_class="SSRF", severity="High",
+    cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N",
+    description="...", steps_to_reproduce="...", impact="...", poc_code="...", poc_output="..."
+)
+api.record_hunt(target="target.com", vuln_class="SSRF", success=True, technique="Open redirect → SSRF", tech_stack=["Django"], platform="intigriti")
+```
+
+### For submission reports (replaces writing INTI_*.md files):
+```python
+report_id = api.create_report(
+    finding_id=finding_id, program_id=program_id, platform="intigriti",
+    report_slug="INTI_HIGH_001", title="SSRF via redirect parameter",
+    severity="High", cvss_vector="CVSS:3.1/...", markdown_body=full_report_markdown
+)
+```
+
+### For building blocks:
+```python
+api.save_finding(..., is_building_block=True, building_block_notes="Chain with OAuth token theft")
+```
+
+### View reports before submission:
+Reports are reviewed at https://bounty-dashboard-887002731862.europe-west1.run.app/reports — the user approves submission from the dashboard.
+
 ## Quick Start
 
 ```
 1. Input: Intigriti program URL, PDF, or manual scope description
-2. If URL provided and $INTIGRITI_PAT is set:
+2. Register engagement in DB: db.upsert_program() + db.create_engagement()
+3. If URL provided and $INTIGRITI_PAT is set:
    → Resolve program handle to ID via Researcher API
    → Fetch domains, tiers, rules of engagement, and testing requirements
    → Extract testingRequirements (User-Agent, headers) for scope contract
@@ -20,11 +65,11 @@ Automates Intigriti workflows: scope parsing → mobile app acquisition → reco
 5. For mobile assets: use /mobile-app-acquisition to detect emulators and download apps
 6. Run /bounty-recon for prioritization + recon pipeline (recon only, no agent deployment)
 7. **Autopilot decision**: Ask user — "Autopilot mode? (paranoid/normal/yolo/no)". If yes → invoke `/autopilot`. If no → invoke `/pentest` directly.
-8. Invoke /pentest in sub-orchestrator mode OR /autopilot (testing engine)
-9. MANDATORY: Invoke /bounty-validation skill for PoC validation + pre-submission gate + AI compliance
-   → /bounty-validation enforces: anti-hallucination checks, AI disclosure, evidence quality, OOS checks, never-submit list
-10. Record validated findings: `python3 tools/hunt_memory.py record ...` for each finding
-11. Generate Intigriti-formatted reports (only after /bounty-validation passes)
+9. Invoke /pentest in sub-orchestrator mode OR /autopilot (testing engine)
+10. MANDATORY: Invoke /bounty-validation skill for PoC validation + pre-submission gate + AI compliance
+11. Save validated findings to DB: db.save_finding() + db.upload_evidence() + db.record_hunt()
+12. Generate Intigriti-formatted reports to DB: db.create_report() (only after /bounty-validation passes)
+13. Direct user to dashboard to review and approve submissions
 ```
 
 ## Scope Input Methods
@@ -170,29 +215,22 @@ Use `tools/report_validator.py` to validate.
 
 ## Output Structure
 
+**PRIMARY**: All findings, reports, and engagement data stored in the **Bounty Intel database** via `BountyIntelClient`. Dashboard at `https://bounty-dashboard-887002731862.europe-west1.run.app` for review and approval.
+
+**SECONDARY** (ephemeral only): Temp directory during active testing.
+
 ```
-outputs/intigriti-<program>/
-├── apps/                         # Downloaded mobile apps
-│   ├── <package>.apk
-│   └── <bundle>.ipa
-├── findings/
-│   ├── finding-001/
-│   │   ├── report.md             # Intigriti report
-│   │   ├── poc.py                # Validated PoC
-│   │   ├── poc_output.txt        # Proof
-│   │   ├── workflow.md           # Manual steps
-│   │   └── evidence/             # Per-finding evidence
-│   │       ├── screenshot-*.png  # Playwright browser captures
-│   │       ├── curl-*.txt        # Real curl -v output
-│   │       └── raw-source.txt    # Raw tool output
-├── reports/
-│   ├── submissions/
-│   │   ├── INTI_CRITICAL_001.md  # Ready to submit
-│   │   └── INTI_HIGH_001.md
-│   └── SUBMISSION_GUIDE.md
-└── evidence/                     # Shared engagement evidence
-    ├── screenshots/
-    └── http-logs/
+Database (primary):
+  programs → scope, tech stack, metadata
+  engagements → recon data, attack surface, status
+  findings → description, PoC, evidence (GCS)
+  submission_reports → platform-ready markdown, approval status
+  hunt_memory → cross-target patterns
+
+Local (ephemeral):
+  outputs/intigriti-{program}/
+  ├── apps/         # Downloaded mobile apps (temp)
+  └── temp/         # Tool output, curl captures (temp)
 ```
 
 ## Platform Differences (vs HackerOne)
@@ -230,6 +268,7 @@ See `reference/PLATFORM_GUIDE.md` for full comparison.
 
 ## Tools
 
+- `bounty_intel.client.BountyIntelClient` - **Primary persistence** (findings, reports, hunt memory, activity)
 - `tools/scope_parser.py` - Parse Intigriti scope from structured data
 - `tools/report_validator.py` - Validate report completeness
 - `/pentest` skill - Testing engine (invoked in sub-orchestrator mode)
@@ -242,6 +281,7 @@ See `reference/PLATFORM_GUIDE.md` for full comparison.
 - `/authenticating` skill - Auth bypass, 2FA, CAPTCHA testing
 - `dom-xss-scanner` agent - Automated DOM XSS via Playwright (auto for JS targets)
 - **Utility agents**: `patt-fetcher`, `script-generator`, `pentester-validator`
+- **Dashboard**: https://bounty-dashboard-887002731862.europe-west1.run.app — report review + approval
 
 ## Usage
 

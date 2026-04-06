@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Submissions - Bounty Intel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Submission Tracker ({{ submissions|length }})</h1>
+</div>
+
+<div class="filters">
+  <select class="filter-select" onchange="location.href='?disposition='+this.value+'&platform={{ filter_platform }}'">
+    <option value="">All Dispositions</option>
+    {% for d in ['new','triaged','needs_more_info','resolved','duplicate','informative','not_applicable'] %}
+    <option value="{{ d }}" {% if filter_disposition == d %}selected{% endif %}>{{ d }}</option>
+    {% endfor %}
+  </select>
+  <select class="filter-select" onchange="location.href='?disposition={{ filter_disposition }}&platform='+this.value">
+    <option value="">All Platforms</option>
+    <option value="hackerone" {% if filter_platform == 'hackerone' %}selected{% endif %}>HackerOne</option>
+    <option value="intigriti" {% if filter_platform == 'intigriti' %}selected{% endif %}>Intigriti</option>
+  </select>
+</div>
+
+<table>
+  <thead><tr><th>ID</th><th>Program</th><th>Title</th><th>Severity</th><th>Disposition</th><th>Bounty</th><th>Submitted</th></tr></thead>
+  <tbody>
+    {% for s in submissions %}
+    <tr>
+      <td class="mono muted">{{ s.platform_id[:12] }}</td>
+      <td>{{ s.program.company_name[:20] if s.program else '?' }}</td>
+      <td>{{ s.title[:45] }}{% if s.title and s.title|length > 45 %}...{% endif %}</td>
+      <td><span class="badge {{ severity_badge(s.severity or '') }}">{{ s.severity or '?' }}</span></td>
+      <td><span class="badge {{ badge_class(s.disposition) }}">{{ s.disposition }}</span></td>
+      <td class="mono">{{ s.listed_currency }} {{ s.listed_bounty }}</td>
+      <td class="muted">{{ days_ago(s.created_at) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
