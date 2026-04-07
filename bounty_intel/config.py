@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     hackerone_username: str = ""
     hackerone_api_token: str = ""
     intigriti_cookie: str = ""
+    intigriti_pat: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

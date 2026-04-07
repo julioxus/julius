@@ -121,10 +121,20 @@ class AIEvalIn(BaseModel):
 
 # ── Programs ─────────────────────────────────────────────────
 @router.get("/programs", dependencies=[Depends(verify_api_key)])
-async def list_programs(platform: str = "", status: str = ""):
+async def list_programs(
+    platform: str = "",
+    status: str = "",
+    search: str = "",
+    sort: str = "",
+):
     from bounty_intel import service
-    
-    programs = service.list_programs(platform=platform or None, status=status or None)
+
+    programs = service.list_programs(
+        platform=platform or None,
+        status=status or None,
+        search=search.strip() or None,
+        sort=sort or None,
+    )
     return [{"id": p.id, "platform": p.platform, "handle": p.platform_handle,
              "company_name": p.company_name, "status": p.status, "bounty_type": p.bounty_type,
              "tech_stack": p.tech_stack or [], "notes": p.notes or "",
@@ -410,6 +420,9 @@ async def api_sync(data: SyncRequest):
     if data.cookie and data.source in ("intigriti", "all"):
         import bounty_intel.config
         bounty_intel.config.settings.intigriti_cookie = data.cookie
+        # Persist cookie to DB for future syncs (survives restarts)
+        from bounty_intel import service
+        service.save_intigriti_cookie(data.cookie)
 
     from bounty_intel.sync.delta import sync_all
     source = data.source
@@ -684,6 +697,19 @@ async def dedup_programs():
     return {"ok": True}
 
 
+@router.post("/admin/intigriti-cookie", dependencies=[Depends(verify_api_key)])
+async def push_intigriti_cookie(data: dict):
+    """Push a fresh Intigriti cookie to the server. Persists in DB for future syncs."""
+    cookie = data.get("cookie", "")
+    if not cookie:
+        raise HTTPException(400, "cookie field required")
+    import bounty_intel.config
+    from bounty_intel import service
+    bounty_intel.config.settings.intigriti_cookie = cookie
+    service.save_intigriti_cookie(cookie)
+    return {"ok": True, "cookie_length": len(cookie)}
+
+
 @router.post("/admin/sync-report-statuses", dependencies=[Depends(verify_api_key)])
 async def sync_report_statuses_endpoint():
     from bounty_intel.migration.import_existing import sync_report_statuses
@@ -691,9 +717,79 @@ async def sync_report_statuses_endpoint():
     return {"ok": True}
 
 
+@router.post("/admin/refresh-program-statuses", dependencies=[Depends(verify_api_key)])
+async def refresh_program_statuses():
+    from bounty_intel import service
+    updated = service.refresh_program_statuses()
+    return {"updated": updated}
+
+
+@router.post("/admin/backfill-submitted-at", dependencies=[Depends(verify_api_key)])
+async def backfill_submitted_at():
+    """Backfill submitted_at for reports that were submitted but missing the timestamp."""
+    from bounty_intel.db import Submission, SubmissionReport, get_session
+    from sqlalchemy import select
+
+    session = get_session()
+    # Find reports with terminal status but no submitted_at
+    reports = session.scalars(
+        select(SubmissionReport).where(
+            SubmissionReport.status.in_(["submitted", "accepted", "rejected"]),
+            SubmissionReport.submitted_at.is_(None),
+        )
+    ).all()
+    updated = 0
+    for report in reports:
+        # Try to get date from linked submission
+        sub = session.scalar(
+            select(Submission).where(Submission.report_id == report.id)
+        )
+        if not sub:
+            sub = session.scalar(
+                select(Submission).where(
+                    Submission.platform == report.platform,
+                    Submission.platform_id == report.platform_submission_id,
+                )
+            )
+        if sub and sub.created_at:
+            report.submitted_at = sub.created_at
+            updated += 1
+    session.commit()
+    session.close()
+    return {"backfilled": updated, "total_missing": len(reports)}
+
+
+# ── Platform Discovery ─────────────────────────────────────
+@router.get("/platforms/intigriti/programs", dependencies=[Depends(verify_api_key)])
+async def search_intigriti_programs(status: str = "", limit: int = 50):
+    from bounty_intel.platforms import search_intigriti_programs as _search
+    return _search(status=status, limit=limit)
+
+
+@router.get("/platforms/intigriti/programs/{program_id}", dependencies=[Depends(verify_api_key)])
+async def get_intigriti_program_detail(program_id: str):
+    from bounty_intel.platforms import get_intigriti_program_detail as _detail
+    result = _detail(program_id)
+    if not result:
+        raise HTTPException(404, "Program not found or PAT not configured")
+    return result
+
+
+@router.get("/platforms/hackerone/programs", dependencies=[Depends(verify_api_key)])
+async def search_hackerone_programs(limit: int = 50):
+    from bounty_intel.platforms import search_hackerone_programs as _search
+    return _search(limit=limit)
+
+
+@router.get("/platforms/hackerone/programs/{handle}/scope", dependencies=[Depends(verify_api_key)])
+async def get_hackerone_program_scope(handle: str):
+    from bounty_intel.platforms import get_hackerone_program_scope as _scope
+    return _scope(handle)
+
+
 # ── Stats ────────────────────────────────────────────────────
 @router.get("/stats", dependencies=[Depends(verify_api_key)])
 async def api_stats():
     from bounty_intel import service
-    
+
     return service.get_stats()

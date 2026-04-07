@@ -5,40 +5,94 @@
   <h1>Programs ({{ programs|length }})</h1>
 </div>
 
-<div class="filters">
-  <select class="filter-select" onchange="location.href='?platform='+this.value+'&status={{ filter_status }}'">
-    <option value="">All Platforms</option>
-    <option value="hackerone" {% if filter_platform == 'hackerone' %}selected{% endif %}>HackerOne</option>
-    <option value="intigriti" {% if filter_platform == 'intigriti' %}selected{% endif %}>Intigriti</option>
-  </select>
-  <select class="filter-select" onchange="location.href='?platform={{ filter_platform }}&status='+this.value">
-    <option value="">All Statuses</option>
-    <option value="open" {% if filter_status == 'open' %}selected{% endif %}>Open</option>
-    <option value="deprioritized" {% if filter_status == 'deprioritized' %}selected{% endif %}>Deprioritized</option>
-    <option value="suspended" {% if filter_status == 'suspended' %}selected{% endif %}>Suspended</option>
-    <option value="closed" {% if filter_status == 'closed' %}selected{% endif %}>Closed</option>
-  </select>
+{# ── Build query string for sort links ── #}
+{% set qs_base = [] %}
+{% if filter_platform %}{% set _ = qs_base.append('platform=' + filter_platform) %}{% endif %}
+{% if filter_status %}{% set _ = qs_base.append('status=' + filter_status) %}{% endif %}
+{% if filter_search %}{% set _ = qs_base.append('search=' + filter_search) %}{% endif %}
+{% set qs_filters = qs_base|join('&') %}
+
+{# ── Filters (all apply on change) ── #}
+<div class="filters" style="align-items:center">
+  <form id="filterForm" method="get" action="/programs" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;width:100%">
+    <input type="text" name="search" value="{{ filter_search }}" placeholder="Search programs..." class="filter-select" style="flex:1;min-width:200px">
+    <select name="platform" class="filter-select">
+      <option value="">All Platforms</option>
+      <option value="hackerone" {% if filter_platform == 'hackerone' %}selected{% endif %}>HackerOne</option>
+      <option value="intigriti" {% if filter_platform == 'intigriti' %}selected{% endif %}>Intigriti</option>
+    </select>
+    <select name="status" class="filter-select">
+      <option value="">All Statuses</option>
+      <option value="open" {% if filter_status == 'open' %}selected{% endif %}>Open</option>
+      <option value="active" {% if filter_status == 'active' %}selected{% endif %}>Active</option>
+      <option value="paused" {% if filter_status == 'paused' %}selected{% endif %}>Paused</option>
+      <option value="deprioritized" {% if filter_status == 'deprioritized' %}selected{% endif %}>Deprioritized</option>
+      <option value="closed" {% if filter_status == 'closed' %}selected{% endif %}>Closed</option>
+    </select>
+    <input type="hidden" name="sort" value="{{ current_sort }}">
+    {% if filter_search or filter_platform or filter_status %}
+    <a href="/programs" class="btn btn-sm" style="color:var(--muted);font-size:0.85rem;text-decoration:none">Clear</a>
+    {% endif %}
+  </form>
 </div>
+
+{# ── Sort helper macro ── #}
+{% macro sort_header(label, key) %}
+  {% set next_sort = ('-' + key) if current_sort == key else key %}
+  {% set arrow = ' ▲' if current_sort == key else (' ▼' if current_sort == '-' + key else '') %}
+  <th style="cursor:pointer;user-select:none;white-space:nowrap" onclick="location.href='?{{ qs_filters }}&sort={{ next_sort }}'">{{ label }}{{ arrow }}</th>
+{% endmacro %}
 
 <table>
   <thead>
-    <tr><th>Program</th><th>Platform</th><th>Status</th><th>Type</th><th>Submissions</th><th>Paid</th><th>Rate</th></tr>
+    <tr>
+      {{ sort_header('Program', 'name') }}
+      {{ sort_header('Platform', 'platform') }}
+      {{ sort_header('Status', 'status') }}
+      {{ sort_header('Submissions', 'subs') }}
+      {{ sort_header('Paid', 'paid') }}
+      {{ sort_header('Rate', 'rate') }}
+      {{ sort_header('Last Report', 'last_report') }}
+      {{ sort_header('Added', 'created') }}
+    </tr>
   </thead>
   <tbody>
     {% for p in programs %}
-    <tr onclick="location.href='/programs/{{ p.program.id }}'" style="cursor:pointer">
+    <tr onclick="location.href='/programs/{{ p.program.id }}'" style="cursor:pointer{% if p.program.status == 'paused' %};opacity:0.5{% endif %}">
       <td style="display:flex;align-items:center;gap:0.5rem">
         {% set logo = company_logo_url(p.program) %}{% if logo %}<img src="{{ logo }}" alt="" class="company-logo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="logo-fallback" style="display:none">{{ p.program.company_name[0] }}</span>{% else %}<span class="logo-fallback" style="display:flex">{{ p.program.company_name[0] }}</span>{% endif %}
         <strong>{{ p.program.company_name }}</strong>
       </td>
       <td><span class="badge badge-{% if p.program.platform == 'hackerone' %}blue{% else %}purple{% endif %}">{{ p.program.platform }}</span></td>
       <td><span class="badge {{ status_badge(p.program.status) }}">{{ p.program.status }}</span></td>
-      <td>{{ p.program.bounty_type or 'bounty' }}</td>
       <td class="mono">{{ p.sub_count }}</td>
       <td class="mono green">{{ p.paid_count }}</td>
       <td class="mono">{% if p.sub_count > 0 %}{{ "%.0f"|format(p.paid_count / p.sub_count * 100) }}%{% else %}-{% endif %}</td>
+      <td class="mono" style="white-space:nowrap">{% if p.last_report_at %}{{ p.last_report_at.strftime('%Y-%m-%d') }}{% else %}<span style="color:var(--muted)">-</span>{% endif %}</td>
+      <td class="mono" style="white-space:nowrap">{% if p.program.created_at %}{{ p.program.created_at.strftime('%Y-%m-%d') }}{% else %}-{% endif %}</td>
     </tr>
     {% endfor %}
+    {% if not programs %}
+    <tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--muted)">No programs match your filters</td></tr>
+    {% endif %}
   </tbody>
 </table>
+
+<script>
+(function(){
+  var form = document.getElementById('filterForm');
+  form.querySelectorAll('select').forEach(function(el){
+    el.addEventListener('change', function(){ form.submit(); });
+  });
+  var searchInput = form.querySelector('input[name="search"]');
+  var debounce;
+  searchInput.addEventListener('keydown', function(e){
+    if(e.key === 'Enter'){ e.preventDefault(); clearTimeout(debounce); form.submit(); }
+  });
+  searchInput.addEventListener('input', function(){
+    clearTimeout(debounce);
+    debounce = setTimeout(function(){ form.submit(); }, 400);
+  });
+})();
+</script>
 {% endblock %}

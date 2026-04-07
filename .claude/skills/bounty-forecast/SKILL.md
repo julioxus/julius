@@ -5,23 +5,55 @@ Analyzes Intigriti + HackerOne submissions, evaluates each pending report from a
 ## Trigger
 When user says: "bounty forecast", "bounty analysis", "how much money", "intigriti earnings", "intigriti forecast", "hackerone earnings", "hackerone forecast", "all bounties", "combined forecast", "analyze my bounties", "which programs should I focus on"
 
-## Requirements
-- `bounty_intel` package installed: `pip install -e .` (from repo root)
-- `DATABASE_URL` in `.env` pointing to Cloud SQL (or local PG)
-- For sync: `HACKERONE_USERNAME` and `HACKERONE_API_TOKEN` in `.env`
-- For Intigriti sync: valid session cookie or Playwright for browser login
+## Requirements & Credentials
+
+### HackerOne (API token — automatic, no user action needed)
+- Credentials: `HACKERONE_USERNAME` + `HACKERONE_API_TOKEN` in `.env` and Secret Manager
+- Used by: `bounty_sync(source="hackerone")` — fully automatic delta sync
+
+### Intigriti (PAT + session cookie)
+Two auth mechanisms, each used for different data:
+
+**PAT** (`INTIGRITI_PAT` in `.env`) — for program metadata:
+- External API: `api.intigriti.com/external/researcher/v1/programs`
+- Used for: program states (open/suspended) — always available, no expiry
+- Auth: `Authorization: Bearer $INTIGRITI_PAT`
+
+**Session cookie** — for submission data:
+- Core API: `app.intigriti.com/api/core/researcher/submissions`
+- Used for: submissions, submission detail (PoC body, payouts)
+- Cookie sources (priority order):
+  1. `INTIGRITI_COOKIE` env var
+  2. Cached cookie at `~/.intigriti/session_cookie.txt` (if still valid)
+  3. Playwright browser login (local only — auto-launches browser, user logs in)
+- **If cookie is expired**: the sync returns `error: no_cookie` for submissions, but program states still sync via PAT. Ask the user to either:
+  - Sync from the dashboard (which has an active session)
+  - Run `! python -m bounty_intel sync --source intigriti` to trigger Playwright login
+  - Provide a fresh cookie manually
+
+### Bounty Intel API
+- `BOUNTY_INTEL_API_KEY` in `.env` — for admin endpoints (refresh statuses, backfill)
+- Dashboard: https://bounty-dashboard-887002731862.europe-west1.run.app
 
 ## Pipeline
 
-### Step 1: Sync platform data (delta — only fetches changes)
+### Step 1: Sync platform data + refresh program statuses
+
+**MANDATORY before any forecast.** Sync both platforms and refresh derived data:
+
+1. `bounty_sync(source="all")` — delta sync both platforms
+2. Check the result:
+   - HackerOne: should show `upserted: N` (automatic via API token)
+   - Intigriti: if `error: no_cookie`, warn user and proceed with H1 data only or ask for cookie
+3. Refresh program statuses (derives open/active/paused/closed from submissions + platform state):
 ```bash
-source .venv/bin/activate
-python -m bounty_intel sync
+source .env && curl -s -X POST "$BOUNTY_INTEL_API_URL/api/v1/admin/refresh-program-statuses" -H "X-API-Key: $BOUNTY_INTEL_API_KEY"
 ```
-This:
-- Fetches HackerOne reports via API (token-based, automatic)
-- Fetches Intigriti submissions (cookie-based — auto-launches browser if expired)
-- Only upserts changed records since last sync (watermark-based delta)
+
+This ensures:
+- Submissions, payouts, and report statuses are up to date
+- Program statuses reflect current platform state (open/active/paused/closed)
+- Auto-created reports are linked and backfilled from platform data
 
 ### Step 2: AI Triager Evaluation (done by Claude Code inline)
 

@@ -6,7 +6,7 @@ External consumers (skills) use BountyIntelClient (HTTP) instead.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -36,14 +36,78 @@ def _utcnow():
 
 
 # ── Programs ─────────────────────────────────────────────────
-def list_programs(platform: str | None = None, status: str | None = None) -> list[Program]:
+def list_programs(
+    platform: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
+    sort: str | None = None,
+) -> list[Program]:
     with get_session() as s:
         q = select(Program)
         if platform:
             q = q.where(Program.platform == platform)
         if status:
             q = q.where(Program.status == status)
-        return list(s.scalars(q.order_by(Program.company_name)).all())
+        if search:
+            term = f"%{search.lower()}%"
+            q = q.where(
+                Program.company_name.ilike(term)
+                | Program.program_name.ilike(term)
+                | Program.platform_handle.ilike(term)
+            )
+        # Sorting: default by most recent first
+        order_col = Program.created_at
+        desc = True
+        if sort:
+            desc = sort.startswith("-")
+            if desc:
+                sort = sort[1:]
+            col_map = {
+                "name": Program.company_name,
+                "platform": Program.platform,
+                "status": Program.status,
+                "created": Program.created_at,
+            }
+            order_col = col_map.get(sort, Program.company_name)
+        q = q.order_by(order_col.desc() if desc else order_col)
+        return list(s.scalars(q).all())
+
+
+def refresh_program_statuses() -> int:
+    """Recalculate program status from submission dispositions and platform state.
+
+    Priority (highest first):
+    - paused: platform reports program as paused/disabled
+    - active: has pending submissions (new/triaged/needs_more_info/accepted)
+    - closed: all submissions are terminal (resolved/duplicate/informative/...)
+    - open: no submissions yet
+    """
+    PENDING = {"new", "triaged", "needs_more_info", "accepted"}
+    PAUSED_STATES = {"paused", "disabled", "soft_launched", "suspended"}
+
+    with get_session() as s:
+        programs = list(s.scalars(select(Program)).all())
+        updated = 0
+        for p in programs:
+            # Check platform state from scope metadata (set by sync)
+            platform_state = (p.scope or {}).get("platform_state", "")
+            if platform_state.lower() in PAUSED_STATES:
+                new_status = "paused"
+            else:
+                subs = list(s.scalars(
+                    select(Submission.disposition).where(Submission.program_id == p.id)
+                ).all())
+                if not subs:
+                    new_status = "open"
+                elif any(d in PENDING for d in subs):
+                    new_status = "active"
+                else:
+                    new_status = "closed"
+            if p.status != new_status:
+                p.status = new_status
+                updated += 1
+        s.commit()
+    return updated
 
 
 def upsert_program(*, platform: str, handle: str, company_name: str, **kwargs) -> int:
@@ -264,6 +328,31 @@ def save_ai_evaluation(submission_id: int, **kwargs) -> int:
 def get_sync_state(source: str) -> SyncState | None:
     with get_session() as s:
         return s.get(SyncState, source)
+
+
+def save_intigriti_cookie(cookie: str) -> None:
+    """Persist Intigriti session cookie in sync_state metadata."""
+    with get_session() as s:
+        stmt = pg_insert(SyncState).values(
+            source="intigriti_cookie",
+            last_sync_at=_utcnow(),
+            sync_metadata={"cookie": cookie, "saved_at": _utcnow().isoformat()},
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["source"],
+            set_={"last_sync_at": _utcnow(), "sync_metadata": stmt.excluded.sync_metadata},
+        )
+        s.execute(stmt)
+        s.commit()
+
+
+def get_intigriti_cookie() -> str | None:
+    """Retrieve persisted Intigriti cookie from DB."""
+    with get_session() as s:
+        state = s.get(SyncState, "intigriti_cookie")
+        if state and state.sync_metadata:
+            return state.sync_metadata.get("cookie")
+    return None
 
 
 def update_sync_state(source: str, last_submission_updated: datetime) -> None:

@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from decimal import Decimal
+from difflib import SequenceMatcher
 
 from bounty_intel.config import settings
 from bounty_intel.db import Payout, Program, Submission, SubmissionReport, get_session
@@ -90,8 +91,8 @@ def _extract_severity(report: dict) -> str:
     return "Medium"
 
 
-def _extract_program(report: dict) -> tuple[str, str, str]:
-    """Returns (handle, company_name, logo_url)."""
+def _extract_program(report: dict) -> tuple[str, str, str, str]:
+    """Returns (handle, company_name, logo_url, submission_state)."""
     team = report.get("relationships", {}).get("program", {}).get("data", {})
     if not team:
         team = report.get("relationships", {}).get("team", {}).get("data", {})
@@ -101,7 +102,9 @@ def _extract_program(report: dict) -> tuple[str, str, str]:
     # HackerOne provides profile_picture_urls with multiple sizes
     pics = attrs.get("profile_picture_urls", {})
     logo_url = pics.get("medium", "") or pics.get("small", "") or ""
-    return handle, name, logo_url
+    # submission_state: open, paused, disabled
+    submission_state = attrs.get("submission_state", "") or attrs.get("state", "") or ""
+    return handle, name, logo_url, submission_state
 
 
 def _extract_bounties(report: dict) -> list[dict]:
@@ -176,7 +179,7 @@ def sync(since: datetime | None = None) -> dict:
 
     for report in reports:
         attrs = report.get("attributes", {})
-        handle, company, logo_url = _extract_program(report)
+        handle, company, logo_url, submission_state = _extract_program(report)
         severity = _extract_severity(report)
         state = attrs.get("state", "new")
         disposition = H1_STATE_TO_DISPOSITION.get(state, "unknown")
@@ -190,27 +193,31 @@ def sync(since: datetime | None = None) -> dict:
         )
 
         # Upsert program
+        scope_data = {"platform_state": submission_state} if submission_state else {}
         prog_stmt = pg_insert(Program).values(
             platform="hackerone",
             platform_handle=handle,
             company_name=company,
             logo_url=logo_url,
+            scope=scope_data,
         )
         prog_stmt = prog_stmt.on_conflict_do_update(
             constraint="uq_program_platform_handle",
             set_={
                 "company_name": prog_stmt.excluded.company_name,
                 "logo_url": prog_stmt.excluded.logo_url,
+                "scope": prog_stmt.excluded.scope,
             },
         )
         program_id = session.execute(prog_stmt.returning(Program.id)).scalar_one()
 
         # Upsert submission
+        title = attrs.get("title", "")
         sub_stmt = pg_insert(Submission).values(
             platform="hackerone",
             platform_id=str(report.get("id", "")),
             program_id=program_id,
-            title=attrs.get("title", ""),
+            title=title,
             severity=severity,
             disposition=disposition,
             listed_bounty=Decimal(str(listed_bounty)),
@@ -254,10 +261,75 @@ def sync(since: datetime | None = None) -> dict:
         linked_report = session.scalar(
             select(SubmissionReport).where(SubmissionReport.platform_submission_id == platform_id_str)
         )
+        # Fallback 1: try fuzzy title match on unlinked reports for this program
+        if not linked_report and program_id and title:
+            candidates = session.scalars(
+                select(SubmissionReport).where(
+                    SubmissionReport.program_id == program_id,
+                    SubmissionReport.platform == "hackerone",
+                    SubmissionReport.platform_submission_id.is_(None),
+                )
+            ).all()
+            best, best_score = None, 0.0
+            for c in candidates:
+                if not c.title:
+                    continue
+                score = SequenceMatcher(None, title.lower(), c.title.lower()).ratio()
+                if score > best_score and score > 0.55:
+                    best, best_score = c, score
+            if best:
+                best.platform_submission_id = platform_id_str
+                sub_row = session.scalar(
+                    select(Submission).where(Submission.platform == "hackerone", Submission.platform_id == platform_id_str)
+                )
+                if sub_row and not sub_row.report_id:
+                    sub_row.report_id = best.id
+                linked_report = best
+        # Fallback 2: auto-create report from submission if disposition is terminal
+        if not linked_report and disposition in DISPOSITION_TO_REPORT_STATUS and title:
+            # Extract report body from H1 API response
+            vuln_info = attrs.get("vulnerability_information", "") or ""
+            weakness_rel = report.get("relationships", {}).get("weakness", {}).get("data", {})
+            weakness_name = (weakness_rel.get("attributes", {}).get("name", "") if weakness_rel else "")
+            body_parts = []
+            if weakness_name:
+                body_parts.append(f"**Weakness**: {weakness_name}\n")
+            if vuln_info:
+                body_parts.append(vuln_info)
+            markdown_body = "\n".join(body_parts) if body_parts else ""
+            new_report = SubmissionReport(
+                program_id=program_id,
+                platform="hackerone",
+                title=title,
+                severity=severity,
+                markdown_body=markdown_body,
+                status=DISPOSITION_TO_REPORT_STATUS[disposition],
+                platform_submission_id=platform_id_str,
+                submitted_at=_parse_iso(attrs.get("created_at")),
+            )
+            session.add(new_report)
+            session.flush()
+            sub_row = session.scalar(
+                select(Submission).where(Submission.platform == "hackerone", Submission.platform_id == platform_id_str)
+            )
+            if sub_row and not sub_row.report_id:
+                sub_row.report_id = new_report.id
+            linked_report = new_report
         if linked_report:
             new_status = DISPOSITION_TO_REPORT_STATUS.get(disposition, linked_report.status)
             if linked_report.status != new_status:
                 linked_report.status = new_status
+            # Backfill empty report body from platform data
+            if not linked_report.markdown_body:
+                vuln_info = attrs.get("vulnerability_information", "") or ""
+                if vuln_info:
+                    weakness_rel = report.get("relationships", {}).get("weakness", {}).get("data", {})
+                    weakness_name = (weakness_rel.get("attributes", {}).get("name", "") if weakness_rel else "")
+                    parts = []
+                    if weakness_name:
+                        parts.append(f"**Weakness**: {weakness_name}\n")
+                    parts.append(vuln_info)
+                    linked_report.markdown_body = "\n".join(parts)
 
         upserted += 1
         if last_updated and (max_updated is None or last_updated > max_updated):

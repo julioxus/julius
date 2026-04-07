@@ -675,6 +675,82 @@ def bounty_get_stats() -> dict:
     return _safe_call(c.get_stats)
 
 
+# ── Intigriti Session ──────────────────────────────────────
+
+
+@mcp.tool()
+def bounty_refresh_intigriti_session() -> dict:
+    """Refresh Intigriti session cookie via Playwright browser login.
+
+    Launches a browser window for the user to log in to Intigriti.
+    After login, the cookie is automatically:
+    1. Cached locally (~/.intigriti/)
+    2. Pushed to Cloud Run DB for server-side syncs
+
+    Use this when Intigriti sync fails with 'no_cookie'.
+    """
+    try:
+        import sys
+        from pathlib import Path
+        auth_tools = str(Path(__file__).resolve().parents[1] / ".claude" / "skills" / "intigriti" / "tools")
+        if auth_tools not in sys.path:
+            sys.path.insert(0, auth_tools)
+        from intigriti_auth import get_session_cookie
+        cookie = get_session_cookie()
+        # Push to server
+        from bounty_intel.sync.intigriti import _push_cookie_to_server
+        _push_cookie_to_server(cookie)
+        return {"status": "ok", "cookie_length": len(cookie), "message": "Cookie refreshed and pushed to server"}
+    except ImportError:
+        return {"error": "Playwright not installed. Run: pip install playwright && playwright install chromium"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Platform Discovery (4) ─────────────────────────────────
+
+
+@mcp.tool()
+def bounty_search_intigriti_programs(status: str = "", limit: int = 50) -> list[dict]:
+    """Search Intigriti programs via External API (PAT-based, no cookie needed).
+
+    Returns programs with name, status (open/suspended), bounty range, industry.
+    Use to discover new programs to work on.
+    """
+    from bounty_intel.platforms import search_intigriti_programs
+    return search_intigriti_programs(status=status, limit=limit)
+
+
+@mcp.tool()
+def bounty_get_intigriti_program_detail(program_id: str) -> dict:
+    """Get full Intigriti program detail including scope (domains/endpoints) and rules of engagement.
+
+    program_id is the Intigriti UUID (from search results). Returns scope assets with tiers.
+    """
+    from bounty_intel.platforms import get_intigriti_program_detail
+    return get_intigriti_program_detail(program_id) or {"error": "not found or PAT not configured"}
+
+
+@mcp.tool()
+def bounty_search_hackerone_programs(limit: int = 50) -> list[dict]:
+    """Search HackerOne programs the researcher has access to.
+
+    Returns programs with name, status, bounty info. Uses H1 API token.
+    """
+    from bounty_intel.platforms import search_hackerone_programs
+    return search_hackerone_programs(limit=limit)
+
+
+@mcp.tool()
+def bounty_get_hackerone_program_scope(handle: str) -> list[dict]:
+    """Get HackerOne program scope (structured assets).
+
+    Returns list of in-scope assets with type, identifier, eligibility, and severity.
+    """
+    from bounty_intel.platforms import get_hackerone_program_scope
+    return get_hackerone_program_scope(handle)
+
+
 # ── Entry point ──────────────────────────────────────────────
 
 

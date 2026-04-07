@@ -55,4 +55,9 @@ def sync_all(sources: list[str] | None = None, force: bool = False) -> dict:
         results[source] = stats
         print(f"  Result: {stats.get('upserted', 0)} upserted, {stats.get('skipped', 0)} skipped")
 
+    # Refresh program statuses based on submission data
+    updated = service.refresh_program_statuses()
+    if updated:
+        print(f"\n  Program statuses refreshed: {updated} updated")
+
     return results

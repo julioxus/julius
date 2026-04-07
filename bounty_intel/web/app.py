@@ -133,7 +133,7 @@ def _severity_badge(severity: str) -> str:
 
 def _status_badge(status: str) -> str:
     return {
-        "active": "badge-green", "paused": "badge-yellow",
+        "active": "badge-green", "paused": "badge-orange",
         "completed": "badge-blue", "deprioritized": "badge-gray",
         "open": "badge-green", "suspended": "badge-yellow", "closed": "badge-red",
         "draft": "badge-gray", "validated": "badge-blue",
@@ -281,25 +281,54 @@ async def dashboard(request: Request):
 # 4.2 — Programs
 # ──────────────────────────────────────────────────────────────
 @app.get("/programs", response_class=HTMLResponse)
-async def programs_list(request: Request, platform: str = "", status: str = ""):
+async def programs_list(
+    request: Request,
+    platform: str = "",
+    status: str = "",
+    search: str = "",
+    sort: str = "",
+):
     from bounty_intel import service
-    from bounty_intel.db import Submission, get_session
+    from bounty_intel.db import Submission, SubmissionReport, get_session
     from sqlalchemy import func, select
 
-    
     programs = service.list_programs(
         platform=platform or None,
         status=status or None,
+        search=search.strip() or None,
+        sort=sort or None,
     )
 
     session = get_session()
-    # Annotate with submission counts
+    # Annotate with submission counts + last submitted report date
     prog_data = []
     for p in programs:
         sub_count = session.scalar(select(func.count(Submission.id)).where(Submission.program_id == p.id)) or 0
         paid_count = session.scalar(select(func.count(Submission.id)).where(Submission.program_id == p.id, Submission.disposition == "resolved")) or 0
-        prog_data.append({"program": p, "sub_count": sub_count, "paid_count": paid_count})
+        # Only consider reports that were actually submitted
+        last_report_at = session.scalar(
+            select(func.max(SubmissionReport.submitted_at)).where(
+                SubmissionReport.program_id == p.id,
+                SubmissionReport.status.in_(["submitted", "accepted", "rejected"]),
+            )
+        )
+        prog_data.append({"program": p, "sub_count": sub_count, "paid_count": paid_count, "last_report_at": last_report_at})
     session.close()
+
+    # In-memory sort for derived columns
+    _min_dt = datetime.min.replace(tzinfo=timezone.utc)
+    derived_sorts = {
+        "subs": lambda x: x["sub_count"],
+        "paid": lambda x: x["paid_count"],
+        "rate": lambda x: (x["paid_count"] / x["sub_count"] * 100 if x["sub_count"] > 0 else -1),
+        "last_report": lambda x: x["last_report_at"] or _min_dt,
+    }
+    sort_key_name = sort.lstrip("-") if sort else ""
+    if sort_key_name in derived_sorts:
+        prog_data.sort(key=derived_sorts[sort_key_name], reverse=sort.startswith("-"))
+    elif not sort:
+        # Default: last report desc (most recent activity first), no-reports at bottom
+        prog_data.sort(key=lambda x: x["last_report_at"] or _min_dt, reverse=True)
 
     return _render(request, "programs.html", {
         "active_page": "programs",
@@ -307,6 +336,8 @@ async def programs_list(request: Request, platform: str = "", status: str = ""):
         "status_badge": _status_badge,
         "filter_platform": platform,
         "filter_status": status,
+        "filter_search": search,
+        "current_sort": sort,
         "company_logo_url": _company_logo_url,
     })
 

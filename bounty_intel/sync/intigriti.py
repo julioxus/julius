@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from decimal import Decimal
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from bounty_intel.config import settings
@@ -28,6 +29,10 @@ DISPOSITION_TO_REPORT_STATUS = {
 BASE_URL = "https://app.intigriti.com"
 SUBMISSIONS_EP = "/api/core/researcher/submissions"
 DETAIL_EP = "/api/core/researcher/submissions/{submission_id}"
+PROGRAMS_EP = "/api/core/researcher/programs"
+
+# Intigriti program status: 3=open, 4=suspended/closed
+PROGRAM_STATUS_MAP = {3: "open", 4: "suspended"}
 
 CLOSE_REASONS = {1: "resolved", 2: "duplicate", 3: "not_applicable", 4: "informative",
                  5: "out_of_scope", 6: "wont_fix", 7: "not_applicable"}
@@ -52,18 +57,19 @@ def _is_server_environment() -> bool:
 
 
 def _get_cookie() -> str | None:
-    """Get Intigriti session cookie, launching browser login if needed.
+    """Get Intigriti session cookie from multiple sources.
 
     Priority:
-    1. INTIGRITI_COOKIE env var (for manual override)
+    1. INTIGRITI_COOKIE env var (for manual override / injected by sync API)
     2. Cached cookie from ~/.intigriti/session_cookie.txt (if still valid)
-    3. Playwright browser login (automatic on local, skipped on server)
+    3. Persisted cookie from DB (pushed by local login or dashboard)
+    4. Playwright browser login (local only — auto-launches browser)
     """
-    # 1. Env var override
+    # 1. Env var / in-memory override
     if settings.intigriti_cookie:
         return settings.intigriti_cookie
 
-    # 2. Cached cookie — check if file exists AND is still valid
+    # 2. Local file cache
     cached = Path.home() / ".intigriti" / "session_cookie.txt"
     meta_file = Path.home() / ".intigriti" / "session_meta.json"
 
@@ -82,10 +88,21 @@ def _get_cookie() -> str | None:
         except (ValueError, KeyError):
             pass
 
-    # 3. Playwright browser login — automatic on local environments
+    # 3. DB-persisted cookie (pushed by local Playwright or dashboard)
+    try:
+        from bounty_intel import service
+        db_cookie = service.get_intigriti_cookie()
+        if db_cookie and _validate_cookie(db_cookie):
+            print("  [+] Using DB-persisted Intigriti cookie")
+            return db_cookie
+        elif db_cookie:
+            print("  [!] DB cookie expired")
+    except Exception:
+        pass  # DB not available (e.g. during local dev without DB)
+
+    # 4. Playwright browser login — local only
     if _is_server_environment():
-        print("  [!] Intigriti cookie expired. Cannot launch browser on server.")
-        print("      Sync locally first: python -m bounty_intel sync --source intigriti")
+        print("  [!] Intigriti cookie expired. No valid cookie in DB or cache.")
         return None
 
     print("  [*] Intigriti cookie expired — launching browser for login...")
@@ -96,6 +113,8 @@ def _get_cookie() -> str | None:
             sys.path.insert(0, auth_tools)
         from intigriti_auth import get_session_cookie
         cookie = get_session_cookie()
+        # Auto-push to Cloud Run DB for server-side use
+        _push_cookie_to_server(cookie)
         return cookie
     except ImportError:
         print("  [!] Playwright not installed. Run: pip install playwright && playwright install chromium")
@@ -103,6 +122,34 @@ def _get_cookie() -> str | None:
         print(f"  [!] Browser login failed: {e}")
 
     return None
+
+
+def _push_cookie_to_server(cookie: str) -> None:
+    """Push fresh cookie to Cloud Run API so server-side syncs can use it."""
+    import os
+    api_url = settings.bounty_intel_api_url or os.environ.get("BOUNTY_INTEL_API_URL", "")
+    api_key = settings.bounty_intel_api_key or os.environ.get("BOUNTY_INTEL_API_KEY", "")
+    if not api_url or not api_key:
+        # Try saving to DB directly if we have DB access
+        try:
+            from bounty_intel import service
+            service.save_intigriti_cookie(cookie)
+            print("  [+] Cookie saved to DB")
+        except Exception:
+            pass
+        return
+    try:
+        data = json.dumps({"cookie": cookie}).encode()
+        req = urllib.request.Request(
+            f"{api_url}/api/v1/admin/intigriti-cookie",
+            data=data, method="POST",
+        )
+        req.add_header("X-API-Key", api_key)
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            print(f"  [+] Cookie pushed to Cloud Run ({resp.status})")
+    except Exception as e:
+        print(f"  [!] Failed to push cookie to server: {e}")
 
 
 def _validate_cookie(cookie: str) -> bool:
@@ -183,10 +230,32 @@ def fetch_detail(cookie: str, submission_id: str) -> dict | None:
     return _fetch_json(url, cookie)
 
 
+def _extract_report_body(detail: dict | None) -> str:
+    """Build markdown body from Intigriti submission detail fields."""
+    if not detail:
+        return ""
+    parts = []
+    endpoint = detail.get("endpointVulnerableComponent") or ""
+    if endpoint:
+        parts.append(f"**Endpoint**: `{endpoint}`\n")
+    poc = detail.get("pocDescription") or ""
+    if poc:
+        parts.append(poc)
+    impact = detail.get("impact") or ""
+    if impact:
+        parts.append(f"\n## Impact\n\n{impact}")
+    solution = detail.get("recommendedSolution") or ""
+    if solution:
+        parts.append(f"\n## Recommended Solution\n\n{solution}")
+    return "\n".join(parts)
+
+
 def sync(since: datetime | None = None) -> dict:
     """Fetch Intigriti submissions and upsert changed ones into DB."""
     all_subs, cookie = fetch_submissions()
     if not all_subs:
+        # Still sync program states (PAT doesn't need cookie)
+        _sync_program_states(cookie)
         return {"fetched": 0, "upserted": 0, "skipped": 0, "max_updated": since, "error": "no_cookie" if not cookie else "no_data"}
     session = get_session()
     upserted = 0
@@ -269,8 +338,10 @@ def sync(since: datetime | None = None) -> dict:
         )
         submission_id = session.execute(sub_stmt.returning(Submission.id)).scalar_one()
 
-        # Fetch payouts if detail available and cookie exists
-        if cookie and (disposition in ("resolved", "accepted") or sub.get("hasBonus")):
+        # Fetch detail if cookie exists and disposition is terminal or has bonus
+        detail = None
+        needs_detail = disposition in DISPOSITION_TO_REPORT_STATUS or sub.get("hasBonus")
+        if cookie and needs_detail:
             detail = fetch_detail(cookie, str(sub.get("id", "")))
             if detail and "payouts" in detail:
                 for p in detail["payouts"]:
@@ -300,13 +371,70 @@ def sync(since: datetime | None = None) -> dict:
 
         # Sync report status if linked
         sub_id_str = str(sub.get("id", ""))
+        title = sub.get("title", "")
         linked_report = session.scalar(
             select(SubmissionReport).where(SubmissionReport.platform_submission_id == sub_id_str)
         )
+        # Fallback: try fuzzy title match on unlinked reports for this program
+        if not linked_report and program_id and title:
+            candidates = session.scalars(
+                select(SubmissionReport).where(
+                    SubmissionReport.program_id == program_id,
+                    SubmissionReport.platform == "intigriti",
+                    SubmissionReport.platform_submission_id.is_(None),
+                )
+            ).all()
+            best, best_score = None, 0.0
+            for c in candidates:
+                if not c.title:
+                    continue
+                score = SequenceMatcher(None, title.lower(), c.title.lower()).ratio()
+                if score > best_score and score > 0.55:
+                    best, best_score = c, score
+            if best:
+                best.platform_submission_id = sub_id_str
+                sub_row = session.scalar(
+                    select(Submission).where(Submission.platform == "intigriti", Submission.platform_id == sub_id_str)
+                )
+                if sub_row and not sub_row.report_id:
+                    sub_row.report_id = best.id
+                linked_report = best
+        # Fallback 2: auto-create report from submission if disposition is terminal
+        if not linked_report and disposition in DISPOSITION_TO_REPORT_STATUS and title:
+            markdown_body = _extract_report_body(detail)
+            new_report = SubmissionReport(
+                program_id=program_id,
+                platform="intigriti",
+                title=title,
+                severity=SEVERITY_MAP.get(sub.get("severity", 0), "Medium"),
+                markdown_body=markdown_body,
+                status=DISPOSITION_TO_REPORT_STATUS[disposition],
+                platform_submission_id=sub_id_str,
+                submitted_at=_ts_to_dt(sub.get("createdAt")),
+            )
+            session.add(new_report)
+            session.flush()
+            sub_row = session.scalar(
+                select(Submission).where(Submission.platform == "intigriti", Submission.platform_id == sub_id_str)
+            )
+            if sub_row and not sub_row.report_id:
+                sub_row.report_id = new_report.id
+            linked_report = new_report
         if linked_report:
             new_status = DISPOSITION_TO_REPORT_STATUS.get(disposition, linked_report.status)
             if linked_report.status != new_status:
                 linked_report.status = new_status
+            # Backfill empty report body from platform detail
+            if not linked_report.markdown_body:
+                if detail:
+                    body = _extract_report_body(detail)
+                    if body:
+                        linked_report.markdown_body = body
+                        print(f"  [Intigriti] Backfilled report {linked_report.id} body ({len(body)} chars)")
+                    else:
+                        print(f"  [Intigriti] Report {linked_report.id}: detail fetched but no body fields found. Keys: {sorted(detail.keys()) if isinstance(detail, dict) else type(detail)}")
+                else:
+                    print(f"  [Intigriti] Report {linked_report.id}: no detail available (cookie={bool(cookie)}, needs_detail={needs_detail})")
 
         upserted += 1
         if last_updated and (max_updated is None or last_updated > max_updated):
@@ -315,4 +443,94 @@ def sync(since: datetime | None = None) -> dict:
     session.commit()
     session.close()
 
+    # Sync program states (uses PAT primarily, cookie as fallback)
+    _sync_program_states(cookie)
+
     return {"fetched": len(all_subs), "upserted": upserted, "skipped": skipped, "max_updated": max_updated}
+
+
+def _fetch_programs_via_pat() -> list[dict] | None:
+    """Fetch programs from Intigriti External API using PAT (no cookie needed)."""
+    import os
+    pat = settings.intigriti_pat if hasattr(settings, "intigriti_pat") else os.environ.get("INTIGRITI_PAT", "")
+    if not pat:
+        return None
+    url = "https://api.intigriti.com/external/researcher/v1/programs?limit=200"
+    req = urllib.request.Request(url)
+    req.add_header("Authorization", f"Bearer {pat}")
+    req.add_header("Accept", "application/json")
+    req.add_header("User-Agent", "BountyIntel/1.0")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return data.get("records", []) if isinstance(data, dict) else data
+    except Exception as e:
+        print(f"  [!] External API error: {e}")
+        return None
+
+
+def _sync_program_states(cookie: str | None = None) -> None:
+    """Fetch program listing from Intigriti and update platform_state in scope.
+
+    Uses PAT (External API) as primary source — no cookie needed.
+    Falls back to Core API with cookie if PAT unavailable.
+    """
+    print("  [Intigriti] Syncing program states...")
+
+    # Primary: PAT-based External API (always available, no expiry)
+    programs_list = _fetch_programs_via_pat()
+    source = "PAT"
+
+    # Fallback: cookie-based Core API
+    if not programs_list and cookie:
+        url = f"{BASE_URL}{PROGRAMS_EP}?offset=0&limit=200"
+        data = _fetch_json(url, cookie)
+        programs_list = data if isinstance(data, list) else (data.get("records", data.get("data", [])) if data else [])
+        source = "cookie"
+
+    if not programs_list:
+        print("  [!] Could not fetch programs list (no PAT or cookie)")
+        return
+
+    print(f"  [Intigriti] Fetched {len(programs_list)} programs via {source}")
+
+    # Build handle → platform_state map
+    # External API: status = {"id": 3, "value": "Open"}, handle = program-only
+    # Core API: status = 3 (int), companyHandle/handle = company/program
+    state_map: dict[str, str] = {}
+    for p in programs_list:
+        # External API format
+        status_raw = p.get("status")
+        if isinstance(status_raw, dict):
+            status_int = status_raw.get("id", 3)
+        else:
+            status_int = status_raw if isinstance(status_raw, int) else 3
+
+        company_handle = p.get("companyHandle", "")
+        program_handle = p.get("handle", "")
+        handle = f"{company_handle}/{program_handle}" if company_handle else program_handle
+        state_map[handle] = PROGRAM_STATUS_MAP.get(status_int, "open")
+
+    session = get_session()
+    updated = 0
+    db_programs = session.scalars(
+        select(Program).where(Program.platform == "intigriti")
+    ).all()
+    for prog in db_programs:
+        # Try exact match first, then match by program handle suffix
+        platform_state = state_map.get(prog.platform_handle, "")
+        if not platform_state:
+            # External API only has program handle (no company prefix)
+            suffix = prog.platform_handle.split("/")[-1] if "/" in prog.platform_handle else prog.platform_handle
+            platform_state = state_map.get(suffix, "")
+        if not platform_state:
+            continue
+        current_state = (prog.scope or {}).get("platform_state", "")
+        if current_state != platform_state:
+            scope = dict(prog.scope or {})
+            scope["platform_state"] = platform_state
+            prog.scope = scope
+            updated += 1
+    session.commit()
+    session.close()
+    print(f"  [Intigriti] Updated {updated} program states")
