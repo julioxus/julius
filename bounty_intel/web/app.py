@@ -774,8 +774,20 @@ async def hunt_intel(request: Request):
     informative = session.scalar(select(func.count(Submission.id)).where(Submission.disposition == "informative")) or 0
     pending = session.scalar(select(func.count(Submission.id)).where(
         Submission.disposition.in_(["new", "triaged", "needs_more_info"]))) or 0
-    total_paid_eur = session.scalar(select(func.sum(Payout.amount_eur)).where(Payout.status.in_(["Paid", "Completed"]))) or 0
-    total_paid_raw = session.scalar(select(func.sum(Payout.amount))) or 0
+    # Calculate earnings with proper FX conversion
+    from bounty_intel.forecast.fx import fetch_ecb_rate
+    all_payouts = session.scalars(select(Payout)).all()
+    total_paid = 0.0
+    for p in all_payouts:
+        amount = float(p.amount or 0)
+        if amount <= 0:
+            continue
+        cur = p.currency or "EUR"
+        if cur == "EUR":
+            total_paid += amount
+        else:
+            pdate = p.paid_date.isoformat() if p.paid_date else date.today().isoformat()
+            total_paid += amount * fetch_ecb_rate(cur, pdate)
 
     overview = {
         "total": total_subs,
@@ -786,7 +798,7 @@ async def hunt_intel(request: Request):
         "informative": informative,
         "acceptance_rate": round((resolved + accepted) / total_subs * 100, 1) if total_subs else 0,
         "rejection_rate": round((duplicates + informative) / total_subs * 100, 1) if total_subs else 0,
-        "total_paid": float(total_paid_eur or total_paid_raw or 0),
+        "total_paid": round(total_paid, 2),
     }
 
     # ── Per-program performance ──
@@ -817,12 +829,23 @@ async def hunt_intel(request: Request):
         if sub.severity:
             pp["severities"].append(sub.severity)
 
-    # Add payout totals per program
+    # Add payout totals per program (with FX conversion)
     for pid in program_perf:
-        paid = session.scalar(
-            select(func.sum(Payout.amount)).join(Submission).where(Submission.program_id == pid)
-        ) or 0
-        program_perf[pid]["paid"] = float(paid)
+        payouts = session.scalars(
+            select(Payout).join(Submission).where(Submission.program_id == pid)
+        ).all()
+        paid_eur = 0.0
+        for p in payouts:
+            amt = float(p.amount or 0)
+            if amt <= 0:
+                continue
+            cur = p.currency or "EUR"
+            if cur == "EUR":
+                paid_eur += amt
+            else:
+                pdate = p.paid_date.isoformat() if p.paid_date else date.today().isoformat()
+                paid_eur += amt * fetch_ecb_rate(cur, pdate)
+        program_perf[pid]["paid"] = round(paid_eur, 2)
         total = program_perf[pid]["total"]
         won = program_perf[pid]["resolved"] + program_perf[pid]["accepted"]
         program_perf[pid]["rate"] = round(won / total * 100) if total else 0
