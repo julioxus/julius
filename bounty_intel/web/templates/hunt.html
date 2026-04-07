@@ -3,79 +3,177 @@
 {% block content %}
 <div class="page-header"><h1>Hunt Intelligence</h1></div>
 
-<!-- Rejection patterns: what NOT to do -->
-{% if rejection_patterns %}
-<h2>Rejection Patterns — Avoid These</h2>
-<div class="insight-box bad">
-  <strong>Most common rejection reasons:</strong>
-  {% for r in rejection_patterns %}
-  <span class="badge {{ badge_class(r.disposition) }}" style="margin-right:0.3rem">{{ r.disposition }}: {{ r.cnt }}x</span>
-  {% if r.severity %}<span class="muted">({{ r.severity }})</span>{% endif %}
-  {% endfor %}
-</div>
-{% endif %}
-
-<!-- Success patterns: what DOES work -->
-{% if success_patterns %}
-<h2>Success Patterns — What Gets Paid</h2>
-<div class="insight-box good">
-  <strong>Paid submissions by severity:</strong>
-  {% for r in success_patterns %}
-  <span class="badge badge-green" style="margin-right:0.3rem">{{ r.platform }} {{ r.severity }}: {{ r.cnt }}x</span>
-  {% endfor %}
-</div>
-{% endif %}
-
-<!-- Techniques by vulnerability class -->
-{% if vuln_stats %}
-<h2>Techniques by Vulnerability Class</h2>
-{% for vc, stats in vuln_stats.items() %}
-<div class="card" style="margin-bottom:1rem">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
-    <div>
-      <strong style="font-size:1.1rem">{{ vc }}</strong>
-      <span class="badge {% if stats.success > 0 and stats.success / stats.total > 0.5 %}badge-green{% elif stats.total > 0 %}badge-yellow{% else %}badge-gray{% endif %}" style="margin-left:0.5rem">
-        {{ stats.success }}/{{ stats.total }} success ({{ "%.0f"|format(stats.success / stats.total * 100) if stats.total > 0 else 0 }}%)
-      </span>
-    </div>
-    {% if stats.payout > 0 %}<span class="mono green">&euro;{{ "%.0f"|format(stats.payout) }} earned</span>{% endif %}
+{# ── Overview KPIs ── #}
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;margin-bottom:2rem">
+  <div class="card" style="text-align:center;padding:1rem">
+    <div class="mono" style="font-size:1.8rem;color:var(--text)">{{ overview.total }}</div>
+    <div class="muted" style="font-size:0.8rem">Submissions</div>
   </div>
-  {% if stats.techniques %}
-  <div style="margin-bottom:0.5rem">
-    <div class="muted" style="font-size:0.8rem;margin-bottom:0.2rem">TECHNIQUES THAT WORKED</div>
-    {% for t in stats.techniques %}
-    <div style="font-size:0.9rem;padding:0.2rem 0">{{ t }}</div>
+  <div class="card" style="text-align:center;padding:1rem">
+    <div class="mono" style="font-size:1.8rem;color:var(--green)">{{ overview.resolved + overview.accepted }}</div>
+    <div class="muted" style="font-size:0.8rem">Won</div>
+  </div>
+  <div class="card" style="text-align:center;padding:1rem">
+    <div class="mono" style="font-size:1.8rem;color:var(--yellow)">{{ overview.pending }}</div>
+    <div class="muted" style="font-size:0.8rem">Pending</div>
+  </div>
+  <div class="card" style="text-align:center;padding:1rem">
+    <div class="mono" style="font-size:1.8rem;color:var(--green)">{{ overview.acceptance_rate }}%</div>
+    <div class="muted" style="font-size:0.8rem">Acceptance</div>
+  </div>
+  <div class="card" style="text-align:center;padding:1rem">
+    <div class="mono" style="font-size:1.8rem;color:var(--red)">{{ overview.duplicates }}</div>
+    <div class="muted" style="font-size:0.8rem">Duplicates</div>
+  </div>
+  <div class="card" style="text-align:center;padding:1rem">
+    <div class="mono" style="font-size:1.8rem;color:var(--green)">&euro;{{ "%.0f"|format(overview.total_paid) }}</div>
+    <div class="muted" style="font-size:0.8rem">Earned</div>
+  </div>
+</div>
+
+{# ── Platform Comparison ── #}
+{% if platform_stats %}
+<h2>Platform Comparison</h2>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1rem;margin-bottom:2rem">
+  {% for platform, ps in platform_stats.items() %}
+  <div class="card" style="padding:1rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+      <span class="badge badge-{% if platform == 'hackerone' %}blue{% else %}purple{% endif %}" style="font-size:0.9rem">{{ platform }}</span>
+      <span class="mono">{{ ps.total }} subs</span>
+    </div>
+    <div style="display:flex;gap:1.5rem;font-size:0.85rem">
+      <div><span class="green mono">{{ ps.won }}</span> won</div>
+      <div><span class="red mono">{{ ps.rejected }}</span> rejected</div>
+      <div><span class="yellow mono">{{ ps.pending }}</span> pending</div>
+    </div>
+    {% set rate = (ps.won / ps.total * 100) if ps.total > 0 else 0 %}
+    <div style="margin-top:0.5rem;background:var(--bg);border-radius:4px;height:6px;overflow:hidden">
+      <div style="width:{{ rate }}%;height:100%;background:var(--green);border-radius:4px"></div>
+    </div>
+    <div class="muted" style="font-size:0.75rem;margin-top:0.25rem">{{ "%.0f"|format(rate) }}% acceptance</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ── Program Performance ── #}
+{% if program_perf %}
+<h2>Program Performance</h2>
+<table style="margin-bottom:2rem">
+  <thead>
+    <tr><th>Program</th><th>Platform</th><th>Subs</th><th>Won</th><th>Rejected</th><th>Pending</th><th>Rate</th><th>Paid</th></tr>
+  </thead>
+  <tbody>
+    {% for pp in program_perf %}
+    <tr{% if pp.rate == 0 and pp.rejected > 0 %} style="opacity:0.5"{% endif %}>
+      <td><strong>{{ pp.name }}</strong></td>
+      <td><span class="badge badge-{% if pp.platform == 'hackerone' %}blue{% else %}purple{% endif %}">{{ pp.platform }}</span></td>
+      <td class="mono">{{ pp.total }}</td>
+      <td class="mono green">{{ pp.resolved + pp.accepted }}</td>
+      <td class="mono red">{{ pp.rejected }}</td>
+      <td class="mono yellow">{{ pp.pending }}</td>
+      <td class="mono">
+        {% if pp.rate > 50 %}<span class="green">{{ pp.rate }}%</span>
+        {% elif pp.rate > 0 %}<span class="yellow">{{ pp.rate }}%</span>
+        {% elif pp.total > 0 %}<span class="red">0%</span>
+        {% else %}-{% endif %}
+      </td>
+      <td class="mono green">{% if pp.paid > 0 %}&euro;{{ "%.0f"|format(pp.paid) }}{% else %}-{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{# ── Severity Analysis ── #}
+{% if severity_matrix %}
+<h2>Severity Breakdown</h2>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:0.75rem;margin-bottom:2rem">
+  {% for sev, sm in severity_matrix %}
+  <div class="card" style="padding:0.75rem">
+    <div style="margin-bottom:0.5rem"><span class="badge {{ severity_badge(sev) }}">{{ sev }}</span></div>
+    <div style="font-size:0.85rem">
+      <div>{{ sm.total }} submitted</div>
+      <div class="green">{{ sm.won }} won{% if sm.total > 0 %} ({{ "%.0f"|format(sm.won / sm.total * 100) }}%){% endif %}</div>
+      <div class="red">{{ sm.rejected }} rejected</div>
+      {% if sm.pending > 0 %}<div class="yellow">{{ sm.pending }} pending</div>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ── Rejection Deep Dive ── #}
+{% if rejection_detail %}
+<h2>Rejection Analysis</h2>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem;margin-bottom:2rem">
+  {% for disposition, rd in rejection_detail.items() %}
+  <div class="card" style="padding:1rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+      <span class="badge {{ badge_class(disposition) }}" style="font-size:0.9rem">{{ disposition }}</span>
+      <span class="mono red">{{ rd.count }}x</span>
+    </div>
+    <div class="muted" style="font-size:0.75rem;margin-bottom:0.5rem">Programs: {{ rd.programs|join(', ') }}</div>
+    {% for ex in rd.examples %}
+    <div style="font-size:0.82rem;padding:0.3rem 0;border-top:1px solid var(--border)">
+      <span class="badge {{ severity_badge(ex.severity) }}" style="font-size:0.7rem">{{ ex.severity }}</span>
+      {{ ex.title }}
+      <span class="muted">({{ ex.program }})</span>
+    </div>
     {% endfor %}
   </div>
-  {% endif %}
-  <div class="muted" style="font-size:0.8rem">Targets tested: {{ stats.targets|join(', ') }}</div>
+  {% endfor %}
 </div>
-{% endfor %}
 {% endif %}
 
-<!-- Tech stack → vulnerability mapping -->
+{# ── Activity Timeline ── #}
+{% if timeline %}
+<h2>Weekly Activity</h2>
+<div style="display:flex;gap:2px;align-items:flex-end;height:120px;margin-bottom:0.5rem">
+  {% set max_val = timeline|map(attribute='1')|map(attribute='submitted')|max %}
+  {% for week, t in timeline %}
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;height:100%">
+    <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;width:100%;gap:1px">
+      {% set h = (t.submitted / max_val * 100) if max_val > 0 else 0 %}
+      {% set h_won = (t.accepted / max_val * 100) if max_val > 0 else 0 %}
+      {% set h_rej = (t.rejected / max_val * 100) if max_val > 0 else 0 %}
+      {% set h_rest = h - h_won - h_rej %}
+      {% if h_rest > 0 %}<div style="width:100%;height:{{ h_rest }}%;background:var(--accent);border-radius:2px 2px 0 0;min-height:{% if h_rest > 0 %}2px{% else %}0{% endif %}"></div>{% endif %}
+      {% if h_won > 0 %}<div style="width:100%;height:{{ h_won }}%;background:var(--green);min-height:2px"></div>{% endif %}
+      {% if h_rej > 0 %}<div style="width:100%;height:{{ h_rej }}%;background:var(--red);border-radius:0 0 2px 2px;min-height:2px"></div>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+<div style="display:flex;gap:2px;margin-bottom:2rem">
+  {% for week, t in timeline %}
+  <div style="flex:1;text-align:center;font-size:0.6rem;color:var(--muted)">{{ week[5:] }}</div>
+  {% endfor %}
+</div>
+<div style="display:flex;gap:1rem;font-size:0.75rem;margin-bottom:2rem;color:var(--muted)">
+  <span><span style="display:inline-block;width:10px;height:10px;background:var(--accent);border-radius:2px"></span> pending</span>
+  <span><span style="display:inline-block;width:10px;height:10px;background:var(--green);border-radius:2px"></span> won</span>
+  <span><span style="display:inline-block;width:10px;height:10px;background:var(--red);border-radius:2px"></span> rejected</span>
+</div>
+{% endif %}
+
+{# ── Tech Stack Intel ── #}
 {% if tech_vulns %}
 <h2>Tech Stack Attack Map</h2>
-<p class="muted" style="margin-bottom:1rem">What vulnerabilities work on which technologies (based on your past testing)</p>
-<table>
-  <thead><tr><th>Technology</th><th>Vulnerabilities Found</th><th>Success Rate</th></tr></thead>
+<table style="margin-bottom:2rem">
+  <thead><tr><th>Technology</th><th>Vulnerabilities Tested</th><th>Rate</th></tr></thead>
   <tbody>
     {% for tech, vulns in tech_vulns.items() %}
     <tr>
       <td><strong>{{ tech }}</strong></td>
       <td>
-        {% set success_vulns = [] %}
         {% for v in vulns %}
-          {% if v.success %}
-          <span class="badge badge-green">{{ v.vuln_class }}</span>
-          {% else %}
-          <span class="badge badge-red">{{ v.vuln_class }}</span>
-          {% endif %}
+        <span class="badge {% if v.success %}badge-green{% else %}badge-red{% endif %}">{{ v.vuln_class }}</span>
         {% endfor %}
       </td>
       <td class="mono">
-        {% set successes = vulns|selectattr('success')|list|length %}
-        {{ "%.0f"|format(successes / vulns|length * 100) if vulns|length > 0 else 0 }}%
+        {% set wins = vulns|selectattr('success')|list|length %}
+        {{ "%.0f"|format(wins / vulns|length * 100) if vulns|length > 0 else 0 }}%
       </td>
     </tr>
     {% endfor %}
@@ -83,9 +181,9 @@
 </table>
 {% endif %}
 
-{% if not hunt_entries %}
-<div class="insight-box">
-  No hunt intelligence data yet. As you test programs, techniques and outcomes are recorded here via <code>api.record_hunt()</code>.
+{% if not overview.total %}
+<div class="card" style="text-align:center;padding:2rem;color:var(--muted)">
+  No submission data yet. Sync platforms to populate intelligence.
 </div>
 {% endif %}
 
