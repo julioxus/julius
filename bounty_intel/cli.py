@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -104,6 +105,65 @@ def cmd_report(args):
         print(f"Report created: id={report_id}, title={title}")
 
 
+def cmd_agent(args):
+    from bounty_intel.agent_dispatch import (
+        list_agent_specs,
+        render_dispatch_payload,
+        render_spawn_snippet,
+    )
+
+    if args.action == "list":
+        for spec in list_agent_specs():
+            print(f"{spec.name}\t{spec.codex_agent_type}\t{spec.description}")
+        return
+
+    if not args.name:
+        print(f"agent {args.action} requires --name")
+        sys.exit(1)
+
+    if args.action == "show":
+        payload = render_dispatch_payload(
+            name=args.name,
+            mission=args.mission or "No mission provided.",
+            context=args.context or "",
+            objective=args.objective or "",
+            output_dir=args.output_dir or "",
+            scope_file=args.scope_file or "",
+            extra_instructions=args.extra_instructions or "",
+        )
+        body = payload if args.json else render_spawn_snippet(payload)
+        print(json.dumps(body, indent=2, ensure_ascii=True) if args.json else body)
+        return
+
+    if args.action == "dispatch":
+        mission = args.mission
+        if not mission and args.mission_file:
+            mission = Path(args.mission_file).read_text(encoding="utf-8")
+        if not mission:
+            print("agent dispatch requires --mission or --mission-file")
+            sys.exit(1)
+
+        payload = render_dispatch_payload(
+            name=args.name,
+            mission=mission,
+            context=args.context or "",
+            objective=args.objective or "",
+            output_dir=args.output_dir or "",
+            scope_file=args.scope_file or "",
+            extra_instructions=args.extra_instructions or "",
+        )
+
+        rendered = json.dumps(payload, indent=2, ensure_ascii=True) if args.json else render_spawn_snippet(payload)
+
+        if args.output:
+            Path(args.output).write_text(rendered + ("\n" if not rendered.endswith("\n") else ""), encoding="utf-8")
+            print(f"Wrote dispatcher payload to {args.output}")
+            return
+
+        print(rendered)
+        return
+
+
 def main():
     parser = argparse.ArgumentParser(prog="bounty-intel", description="Bounty Intelligence System")
     subparsers = parser.add_subparsers(dest="command")
@@ -138,6 +198,20 @@ def main():
     p_report.add_argument("--platform", default="hackerone")
     p_report.add_argument("--file", help="Markdown file to import")
 
+    # agent
+    p_agent = subparsers.add_parser("agent", help="Inspect or render Codex-native Julius agent dispatch payloads")
+    p_agent.add_argument("action", choices=["list", "show", "dispatch"])
+    p_agent.add_argument("--name", help="Logical Julius agent name")
+    p_agent.add_argument("--objective", help="High-level objective for the spawned agent")
+    p_agent.add_argument("--mission", help="Mission body for the spawned agent")
+    p_agent.add_argument("--mission-file", help="Path to a file containing the mission body")
+    p_agent.add_argument("--context", help="Additional context to include in the mission")
+    p_agent.add_argument("--scope-file", help="Scope file path passed to the agent")
+    p_agent.add_argument("--output-dir", help="Artifact output directory passed to the agent")
+    p_agent.add_argument("--extra-instructions", help="Extra execution instructions to append")
+    p_agent.add_argument("--output", help="Write the rendered payload to a file")
+    p_agent.add_argument("--json", action="store_true", help="Emit full JSON payload instead of the spawn snippet")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -152,6 +226,7 @@ def main():
         "stats": cmd_stats,
         "mcp": cmd_mcp,
         "report": cmd_report,
+        "agent": cmd_agent,
     }[args.command](args)
 
 

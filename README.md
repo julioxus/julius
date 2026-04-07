@@ -18,13 +18,14 @@ Julius is a security testing toolkit built around **Claude Code workflows** and 
 
 ## Using Julius From Codex
 
-Codex does not rely on Claude-style slash commands. Instead, this repo exposes Codex-native skills that map to the existing Julius workflows:
+Codex does not rely on Claude-style slash commands. Instead, this repo exposes Codex-native skills and agent prompts that map to the existing Julius workflows:
 
 - `.agents/skills/julius/` - compatibility bridge for the whole toolkit
 - `.agents/skills/pentest/` - maps to `.claude/skills/pentest/`
 - `.agents/skills/hackerone/` - maps to `.claude/skills/hackerone/`
 - `.agents/skills/intigriti/` - maps to `.claude/skills/intigriti/`
 - `.agents/skills/defectdojo/` - maps to `.claude/skills/defectdojo/`
+- `.agents/agents/` - Codex-native subagent prompt layer mirroring the Julius agent roles
 - `plugins/julius/` - repo-local Codex plugin exposing the `bounty-intel` MCP server
 - `.agents/plugins/marketplace.json` - local marketplace entry for the Julius plugin
 
@@ -33,12 +34,19 @@ Practical effect:
 - In Claude: use `/pentest`, `/hackerone`, `/intigriti`, `/defectdojo`
 - In Codex: ask naturally for the same workflow, for example `usa Julius para un pentest` or `ejecuta el flujo de HackerOne`
 
-The Codex skills are thin wrappers. They reuse the existing `.claude/skills/` and `.claude/agents/` documents as the canonical workflow definitions instead of duplicating them, so Claude Code remains fully supported.
+The Codex skills reuse the existing `.claude/skills/` and `.claude/agents/` documents as the canonical workflow definitions, while `.agents/agents/` provides Codex-native prompt templates for delegated subagents. Claude Code remains fully supported.
 
 For Codex, the recommended setup is:
 
 - use `.agents/skills/` for workflow discovery and intent mapping
+- use `python -m bounty_intel agent ...` to render Codex-native Julius subagent payloads
 - use the local `julius` plugin for MCP-backed Bounty Intel access
+
+For delegated work in Codex, the intended flow is:
+
+1. Render a payload with `python -m bounty_intel agent dispatch --name <agent> ... --json`
+2. Read `codex_agent_type`, `fork_context`, and `message`
+3. Call `spawn_agent` with those values
 
 Built on top of [Transilience AI Community Tools](https://github.com/transilienceai/communitytools).
 
@@ -47,7 +55,7 @@ Built on top of [Transilience AI Community Tools](https://github.com/transilienc
 | | |
 |-|-|
 | **50+ skills** | Pentesting, recon, bug bounty, vendor assessment, cloud, mobile, SAST, Web3 audit, reporting |
-| **8 agents** | Orchestrator, executor, validator, DOM XSS scanner, script generator, payload fetcher, HackTheBox, skill creator |
+| **9 agent prompts** | Orchestrator, executor, validator, DOM XSS scanner, script generator, payload fetcher, HackerOne intel fetcher, HackTheBox, skill creator |
 | **186 attack docs** | PortSwigger Academy solutions, cheat sheets, methodology guides |
 | **2 bug bounty platforms** | HackerOne, Intigriti (with autopilot mode) |
 | **Bounty Intel dashboard** | Cloud Run web app — programs, findings, reports, submissions, forecast, hunt memory |

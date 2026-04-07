@@ -13,7 +13,8 @@ When the user asks to use Julius from Codex:
 1. Treat Claude slash commands as workflow intents, not literal commands.
 2. Read the matching source workflow in `.claude/skills/<name>/SKILL.md`.
 3. Load shared executor rules from `.claude/agents/CLAUDE.md` when the workflow deploys testing agents or touches findings or evidence.
-4. Follow the repository root `AGENTS.md` as the passive security knowledge base.
+4. If you need to delegate work with Codex subagents, read the matching prompt in `.agents/agents/` and use it as the Codex-native agent brief.
+5. Follow the repository root `AGENTS.md` as the passive security knowledge base.
 
 ## Workflow Mapping
 
@@ -27,6 +28,8 @@ When the user asks to use Julius from Codex:
 - Prefer retrieval-led reasoning for security tasks.
 - Use Bounty Intel as the source of truth for programs, findings, reports, submissions, and recon data.
 - If `bounty_*` MCP tools are unavailable in the current Codex session, fall back to the local Python implementation in `bounty_intel/`.
+- When porting a Claude agent workflow to Codex, prefer `.agents/agents/*.md` over inventing a fresh subagent prompt.
+- For Codex delegation, use `python -m bounty_intel agent dispatch --name <agent> ... --json`, then pass the returned `codex_agent_type`, `fork_context`, and `message` directly into `spawn_agent`.
 - Preserve the same safety model documented for Claude:
   - scope validation via `tools/scope_checker.py`
   - outbound request checks via `tools/safety_rails.py`
