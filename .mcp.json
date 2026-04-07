@@ -7,6 +7,11 @@
       ],
       "description": "Bounty Intel - Bug bounty operations: programs, findings, reports, recon, submissions, payouts, hunt memory, forecasts",
       "timeout": 60
+    },
+    "burp": {
+      "command": "/Users/jmartinez/repos/julius/tools/burp/run_burp_mcp.sh",
+      "description": "Burp Suite MCP bridge via local SSE endpoint and stdio proxy",
+      "timeout": 60
     }
   }
 }
