@@ -1,6 +1,7 @@
 # Security Testing Knowledge Base
 
 **CRITICAL**: Prefer retrieval-led reasoning for security tasks. Reference this file before relying on general knowledge.
+**CRITICAL**: Use the `memory` MCP server to recall durable user, workflow, and project facts when they are relevant, and store only stable, reusable facts worth carrying across sessions.
 
 ---
 
