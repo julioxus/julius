@@ -55,7 +55,7 @@
 {% endif %}
 
 <!-- Tabs -->
-{% set recon_count = (recon_data.subdomains|default([])|length) + (recon_data.endpoints|default([])|length) + (recon_data.api_specs|default([])|length) + (recon_data.live_hosts|default([])|length) + (recon_data.summaries|default([])|length) + (recon_data.other|default([])|length) %}
+{% set recon_count = recon_data.keys()|list|length if recon_data else 0 %}
 <div class="tabs">
   <a class="tab active" onclick="showTab('findings',this)">Findings ({{ findings|length }})</a>
   <a class="tab" onclick="showTab('blocks',this)">Building Blocks ({{ building_blocks|length }})</a>
@@ -153,31 +153,49 @@
 <!-- Recon Tab -->
 <div id="tab-recon" class="tab-content" style="display:none">
 {% if recon_count > 0 %}
-  {% set categories = [('subdomains', 'Subdomains'), ('endpoints', 'Endpoints'), ('api_specs', 'API Specs'), ('live_hosts', 'Live Hosts'), ('summaries', 'Summaries'), ('other', 'Other')] %}
-  {% for cat_key, cat_label in categories %}
-    {% set items = recon_data.get(cat_key, []) if recon_data else [] %}
-    {% if items %}
-    <div class="card" style="margin-bottom:1rem">
-      <h3 style="margin:0 0 0.5rem;display:flex;align-items:center;gap:0.5rem;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-        {{ cat_label }} <span class="badge badge-blue">{{ items|length }} files</span>
-        <span class="muted" style="font-size:0.8rem">click to expand</span>
-      </h3>
-      <div style="display:none">
-        {% for item in items %}
-        <div style="margin-bottom:1rem;border-left:2px solid var(--border);padding-left:0.8rem">
-          <div class="mono muted" style="font-size:0.75rem;margin-bottom:0.3rem">{{ item.filename }}</div>
-          {% if item.lines is defined and item.lines %}
-            <div style="font-size:0.8rem;color:var(--muted)">{{ item.total_lines|default(item.lines|length) }} entries</div>
-            <pre style="max-height:200px;overflow:auto;background:var(--surface);padding:0.5rem;border-radius:4px;font-size:0.75rem;margin:0.3rem 0">{% for line in item.lines[:50] %}{{ line }}
-{% endfor %}{% if item.lines|length > 50 %}... ({{ item.lines|length - 50 }} more){% endif %}</pre>
-          {% elif item.content %}
-            <pre style="max-height:200px;overflow:auto;background:var(--surface);padding:0.5rem;border-radius:4px;font-size:0.75rem;margin:0.3rem 0;white-space:pre-wrap">{{ item.content[:3000] }}{% if item.content|length > 3000 %}...{% endif %}</pre>
+  {% for section_key, section_val in recon_data.items() %}
+  <div class="card" style="margin-bottom:1rem">
+    <h3 style="margin:0 0 0.5rem;display:flex;align-items:center;gap:0.5rem;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+      {{ section_key.replace('_', ' ').title() }}
+      <span class="muted" style="font-size:0.8rem">click to expand</span>
+    </h3>
+    <div style="display:none">
+      {% if section_val is mapping %}
+        {% for k, v in section_val.items() %}
+        <div style="margin-bottom:0.8rem;border-left:2px solid var(--border);padding-left:0.8rem">
+          <div class="mono" style="font-size:0.8rem;font-weight:600;margin-bottom:0.3rem;color:var(--accent)">{{ k.replace('_', ' ').title() }}</div>
+          {% if v is iterable and v is not string and v is not mapping %}
+            <ul style="margin:0;padding-left:1.2rem;font-size:0.8rem">
+            {% for item in v %}
+              {% if item is mapping %}
+                <li style="margin-bottom:0.2rem"><pre style="margin:0;font-size:0.75rem;white-space:pre-wrap">{{ item|tojson(indent=2) }}</pre></li>
+              {% else %}
+                <li style="margin-bottom:0.2rem;color:var(--text)">{{ item }}</li>
+              {% endif %}
+            {% endfor %}
+            </ul>
+          {% elif v is mapping %}
+            <pre style="max-height:200px;overflow:auto;background:var(--surface);padding:0.5rem;border-radius:4px;font-size:0.75rem;margin:0.3rem 0;white-space:pre-wrap">{{ v|tojson(indent=2) }}</pre>
+          {% else %}
+            <div style="font-size:0.8rem;color:var(--text)">{{ v }}</div>
           {% endif %}
         </div>
         {% endfor %}
-      </div>
+      {% elif section_val is iterable and section_val is not string %}
+        <ul style="margin:0;padding-left:1.2rem;font-size:0.8rem">
+        {% for item in section_val %}
+          {% if item is mapping %}
+            <li style="margin-bottom:0.3rem"><pre style="margin:0;font-size:0.75rem;white-space:pre-wrap">{{ item|tojson(indent=2) }}</pre></li>
+          {% else %}
+            <li style="margin-bottom:0.2rem;color:var(--text)">{{ item }}</li>
+          {% endif %}
+        {% endfor %}
+        </ul>
+      {% else %}
+        <div style="font-size:0.8rem;color:var(--text);padding:0.3rem 0">{{ section_val }}</div>
+      {% endif %}
     </div>
-    {% endif %}
+  </div>
   {% endfor %}
 {% else %}
 <div class="insight-box">No recon data imported for this program.</div>
