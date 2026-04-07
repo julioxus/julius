@@ -205,19 +205,56 @@
 <!-- Attack Surface Tab -->
 <div id="tab-surface" class="tab-content" style="display:none">
 {% if attack_surface %}
-  <!-- Stats grid from coverage if available -->
+  <!-- Coverage stats with detail drill-down from recon data -->
   {% set cov = attack_surface.get('coverage', {}) if attack_surface is mapping else {} %}
   {% if cov and cov is mapping %}
-  <div class="grid" style="margin-bottom:1.5rem">
-    {% for stat_key, stat_val in cov.items() %}
-    {% if stat_val is number %}
-    <div class="card" style="text-align:center">
-      <div style="font-size:2rem;font-weight:700;color:var(--accent)">{{ stat_val }}</div>
-      <div class="muted">{{ stat_key.replace('_', ' ').title() }}</div>
+  {% set recon_subs = recon_data.get('subdomains', {}) if recon_data is mapping else {} %}
+  {% set recon_gql = recon_data.get('graphql_schema', {}) if recon_data is mapping else {} %}
+  {% set detail_map = {
+    'live_hosts': (recon_subs.get('user_facing', []) + recon_subs.get('api_endpoints', [])) if recon_subs else [],
+    'admin_panels': recon_subs.get('admin_panels', []) if recon_subs else [],
+    'subdomains_found': (recon_subs.get('user_facing', []) + recon_subs.get('third_party', []) + recon_subs.get('api_endpoints', []) + recon_subs.get('admin_panels', []) + recon_subs.get('identity', [])) if recon_subs else [],
+    'websocket_endpoints': recon_subs.get('api_endpoints', []) if recon_subs else [],
+    'api_endpoints_mapped': recon_subs.get('api_endpoints', []) if recon_subs else [],
+    'environments_accessible': recon_subs.get('user_facing', []) if recon_subs else [],
+    'graphql_queries_discovered': recon_gql.get('root_queries', {}).items()|list if recon_gql else [],
+    'graphql_operations_captured': recon_gql.get('captured_operations', []) if recon_gql else [],
+    'graphql_mutations_discovered': recon_gql.get('mutations', []) if recon_gql else [],
+    'takeover_candidates': recon_subs.get('takeover_candidates', []) if recon_subs else []
+  } %}
+  {% for stat_key, stat_val in cov.items() %}
+  {% if stat_val is number %}
+  <div class="card" style="margin-bottom:1rem">
+    <div style="display:flex;align-items:center;gap:0.8rem;cursor:pointer" onclick="var d=this.parentElement.querySelector('.detail-content');if(d)d.style.display=d.style.display==='none'?'block':'none'">
+      <div style="font-size:2rem;font-weight:700;color:var(--accent);min-width:3rem;text-align:center">{{ stat_val }}</div>
+      <div>
+        <div style="font-weight:600">{{ stat_key.replace('_', ' ').title() }}</div>
+        {% if detail_map.get(stat_key, [])|length > 0 %}
+        <div class="muted" style="font-size:0.75rem">click to see details</div>
+        {% endif %}
+      </div>
+    </div>
+    {% set details = detail_map.get(stat_key, []) %}
+    {% if details|length > 0 %}
+    <div class="detail-content" style="display:none;margin-top:0.8rem;border-top:1px solid var(--border);padding-top:0.8rem">
+      {% for item in details %}
+      <div style="padding:0.3rem 0 0.3rem 0.8rem;border-left:2px solid var(--border);margin-bottom:0.3rem;font-size:0.8rem">
+        {% if item is mapping %}
+          {% for ik, iv in item.items() %}
+          <span class="mono">{{ ik }}</span>: {{ iv }}{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% elif item is iterable and item is not string %}
+          <span class="mono">{{ item[0] }}</span>: {{ item[1] }}
+        {% else %}
+          {{ item }}
+        {% endif %}
+      </div>
+      {% endfor %}
     </div>
     {% endif %}
-    {% endfor %}
   </div>
+  {% endif %}
+  {% endfor %}
   {% endif %}
 
   <!-- Dynamic sections -->
