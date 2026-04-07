@@ -759,13 +759,143 @@ async def submissions_list(request: Request):
 @app.get("/hunt", response_class=HTMLResponse)
 async def hunt_intel(request: Request):
     from bounty_intel import service
-    from bounty_intel.db import Finding, Submission, get_session
+    from bounty_intel.db import Finding, Payout, Program, Submission, SubmissionReport, get_session
     from sqlalchemy import func, select
+    from sqlalchemy.orm import joinedload
+    from collections import defaultdict
 
     session = get_session()
-    hunt_entries = service.get_hunt_memory()
 
-    # Aggregate by tech_stack → what vulns work
+    # ── Overall stats ──
+    total_subs = session.scalar(select(func.count(Submission.id))) or 0
+    resolved = session.scalar(select(func.count(Submission.id)).where(Submission.disposition == "resolved")) or 0
+    accepted = session.scalar(select(func.count(Submission.id)).where(Submission.disposition == "accepted")) or 0
+    duplicates = session.scalar(select(func.count(Submission.id)).where(Submission.disposition == "duplicate")) or 0
+    informative = session.scalar(select(func.count(Submission.id)).where(Submission.disposition == "informative")) or 0
+    pending = session.scalar(select(func.count(Submission.id)).where(
+        Submission.disposition.in_(["new", "triaged", "needs_more_info"]))) or 0
+    total_paid_eur = session.scalar(select(func.sum(Payout.amount_eur)).where(Payout.status.in_(["Paid", "Completed"]))) or 0
+    total_paid_raw = session.scalar(select(func.sum(Payout.amount))) or 0
+
+    overview = {
+        "total": total_subs,
+        "resolved": resolved,
+        "accepted": accepted,
+        "pending": pending,
+        "duplicates": duplicates,
+        "informative": informative,
+        "acceptance_rate": round((resolved + accepted) / total_subs * 100, 1) if total_subs else 0,
+        "rejection_rate": round((duplicates + informative) / total_subs * 100, 1) if total_subs else 0,
+        "total_paid": float(total_paid_eur or total_paid_raw or 0),
+    }
+
+    # ── Per-program performance ──
+    all_subs = session.scalars(
+        select(Submission).options(joinedload(Submission.program)).order_by(Submission.created_at.desc())
+    ).unique().all()
+
+    program_perf: dict[int, dict] = {}
+    for sub in all_subs:
+        pid = sub.program_id
+        if pid not in program_perf:
+            program_perf[pid] = {
+                "name": sub.program.company_name if sub.program else "?",
+                "platform": sub.platform,
+                "total": 0, "resolved": 0, "accepted": 0, "rejected": 0, "pending": 0,
+                "severities": [], "latest": sub.created_at,
+            }
+        pp = program_perf[pid]
+        pp["total"] += 1
+        if sub.disposition in ("resolved",):
+            pp["resolved"] += 1
+        elif sub.disposition in ("accepted",):
+            pp["accepted"] += 1
+        elif sub.disposition in ("duplicate", "informative", "not_applicable", "out_of_scope", "wont_fix"):
+            pp["rejected"] += 1
+        else:
+            pp["pending"] += 1
+        if sub.severity:
+            pp["severities"].append(sub.severity)
+
+    # Add payout totals per program
+    for pid in program_perf:
+        paid = session.scalar(
+            select(func.sum(Payout.amount)).join(Submission).where(Submission.program_id == pid)
+        ) or 0
+        program_perf[pid]["paid"] = float(paid)
+        total = program_perf[pid]["total"]
+        won = program_perf[pid]["resolved"] + program_perf[pid]["accepted"]
+        program_perf[pid]["rate"] = round(won / total * 100) if total else 0
+
+    sorted_programs = sorted(program_perf.values(), key=lambda x: x["paid"], reverse=True)
+
+    # ── Submission timeline (by week) ──
+    timeline: dict[str, dict] = {}
+    for sub in all_subs:
+        if not sub.created_at:
+            continue
+        week = sub.created_at.strftime("%Y-W%W")
+        if week not in timeline:
+            timeline[week] = {"submitted": 0, "accepted": 0, "rejected": 0}
+        timeline[week]["submitted"] += 1
+        if sub.disposition in ("resolved", "accepted"):
+            timeline[week]["accepted"] += 1
+        elif sub.disposition in ("duplicate", "informative", "not_applicable", "out_of_scope"):
+            timeline[week]["rejected"] += 1
+    sorted_timeline = sorted(timeline.items())[-12:]  # last 12 weeks
+
+    # ── Rejection deep-dive: per-disposition with example titles ──
+    rejection_detail: dict[str, dict] = {}
+    for sub in all_subs:
+        if sub.disposition not in ("duplicate", "informative", "not_applicable", "out_of_scope", "wont_fix"):
+            continue
+        d = sub.disposition
+        if d not in rejection_detail:
+            rejection_detail[d] = {"count": 0, "examples": [], "programs": set()}
+        rejection_detail[d]["count"] += 1
+        rejection_detail[d]["programs"].add(sub.program.company_name if sub.program else "?")
+        if len(rejection_detail[d]["examples"]) < 3:
+            rejection_detail[d]["examples"].append({
+                "title": sub.title[:80] if sub.title else "",
+                "program": sub.program.company_name if sub.program else "?",
+                "severity": sub.severity,
+            })
+    # Convert sets to lists for template
+    for d in rejection_detail:
+        rejection_detail[d]["programs"] = sorted(rejection_detail[d]["programs"])
+
+    # ── Severity distribution: what severity gets accepted vs rejected ──
+    severity_matrix: dict[str, dict] = {}
+    for sub in all_subs:
+        sev = sub.severity or "Unknown"
+        if sev not in severity_matrix:
+            severity_matrix[sev] = {"total": 0, "won": 0, "rejected": 0, "pending": 0}
+        severity_matrix[sev]["total"] += 1
+        if sub.disposition in ("resolved", "accepted"):
+            severity_matrix[sev]["won"] += 1
+        elif sub.disposition in ("duplicate", "informative", "not_applicable", "out_of_scope"):
+            severity_matrix[sev]["rejected"] += 1
+        else:
+            severity_matrix[sev]["pending"] += 1
+    sev_order = ["Critical", "Exceptional", "High", "Medium", "Low", "None", "Unknown"]
+    sorted_severity = [(s, severity_matrix[s]) for s in sev_order if s in severity_matrix]
+
+    # ── Platform comparison ──
+    platform_stats: dict[str, dict] = {}
+    for sub in all_subs:
+        p = sub.platform
+        if p not in platform_stats:
+            platform_stats[p] = {"total": 0, "won": 0, "rejected": 0, "pending": 0}
+        platform_stats[p]["total"] += 1
+        if sub.disposition in ("resolved", "accepted"):
+            platform_stats[p]["won"] += 1
+        elif sub.disposition in ("duplicate", "informative", "not_applicable", "out_of_scope"):
+            platform_stats[p]["rejected"] += 1
+        else:
+            platform_stats[p]["pending"] += 1
+
+    # ── Hunt memory techniques ──
+    hunt_entries = service.get_hunt_memory()
     tech_vulns: dict[str, list] = {}
     for e in hunt_entries:
         for tech in (e.tech_stack or []):
@@ -773,51 +903,23 @@ async def hunt_intel(request: Request):
                 tech_vulns[tech] = []
             tech_vulns[tech].append({
                 "vuln_class": e.vuln_class, "success": e.success,
-                "technique": e.technique_summary, "target": e.target,
-                "payout": float(e.payout or 0),
+                "technique": e.technique_summary,
             })
-
-    # Aggregate by vuln_class
-    vuln_stats: dict[str, dict] = {}
-    for e in hunt_entries:
-        vc = e.vuln_class
-        if vc not in vuln_stats:
-            vuln_stats[vc] = {"total": 0, "success": 0, "payout": 0, "techniques": [], "targets": []}
-        vuln_stats[vc]["total"] += 1
-        if e.success:
-            vuln_stats[vc]["success"] += 1
-        vuln_stats[vc]["payout"] += float(e.payout or 0)
-        if e.technique_summary and e.technique_summary not in vuln_stats[vc]["techniques"]:
-            vuln_stats[vc]["techniques"].append(e.technique_summary)
-        if e.target not in vuln_stats[vc]["targets"]:
-            vuln_stats[vc]["targets"].append(e.target)
-
-    # Lessons from rejections: what disposition + severity combos fail most
-    rejection_patterns = session.execute(
-        select(Submission.disposition, Submission.severity, func.count().label("cnt"))
-        .where(Submission.disposition.in_(["duplicate", "informative", "not_applicable"]))
-        .group_by(Submission.disposition, Submission.severity)
-        .order_by(func.count().desc())
-    ).all()
-
-    # Success patterns: what severity + platform combos get paid
-    success_patterns = session.execute(
-        select(Submission.platform, Submission.severity, func.count().label("cnt"))
-        .where(Submission.disposition == "resolved")
-        .group_by(Submission.platform, Submission.severity)
-        .order_by(func.count().desc())
-    ).all()
 
     session.close()
 
     return _render(request, "hunt.html", {
         "active_page": "hunt",
-        "hunt_entries": hunt_entries,
+        "overview": overview,
+        "program_perf": sorted_programs,
+        "timeline": sorted_timeline,
+        "rejection_detail": rejection_detail,
+        "severity_matrix": sorted_severity,
+        "platform_stats": platform_stats,
         "tech_vulns": tech_vulns,
-        "vuln_stats": vuln_stats,
-        "rejection_patterns": rejection_patterns,
-        "success_patterns": success_patterns,
+        "hunt_entries": hunt_entries,
         "badge_class": _badge_class,
+        "severity_badge": _severity_badge,
     })
 
 
