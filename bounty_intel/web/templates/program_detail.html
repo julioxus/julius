@@ -229,9 +229,9 @@
       {% if section_val is iterable and section_val is not string and section_val is not mapping %}
         <span class="badge badge-blue">{{ section_val|length }}</span>
       {% endif %}
-      <span class="muted" style="font-size:0.8rem">click to expand</span>
+      <span class="muted" style="font-size:0.8rem">click to collapse</span>
     </h3>
-    <div style="display:none">
+    <div>
       {% if section_val is mapping %}
         {% for k, v in section_val.items() %}
         {% if not (section_key == 'coverage' and v is number) %}
