@@ -205,66 +205,85 @@
 <!-- Attack Surface Tab -->
 <div id="tab-surface" class="tab-content" style="display:none">
 {% if attack_surface %}
+  <!-- Stats grid from coverage if available -->
+  {% set cov = attack_surface.get('coverage', {}) if attack_surface is mapping else {} %}
+  {% if cov and cov is mapping %}
   <div class="grid" style="margin-bottom:1.5rem">
+    {% for stat_key, stat_val in cov.items() %}
+    {% if stat_val is number %}
     <div class="card" style="text-align:center">
-      <div style="font-size:2rem;font-weight:700;color:var(--accent)">{{ attack_surface.get('domain_count', attack_surface.get('domains', [])|length) }}</div>
-      <div class="muted">Domains in Scope</div>
+      <div style="font-size:2rem;font-weight:700;color:var(--accent)">{{ stat_val }}</div>
+      <div class="muted">{{ stat_key.replace('_', ' ').title() }}</div>
     </div>
-    <div class="card" style="text-align:center">
-      <div style="font-size:2rem;font-weight:700;color:var(--accent)">{{ attack_surface.get('subdomain_count', 0) }}</div>
-      <div class="muted">Subdomains Found</div>
-    </div>
-    <div class="card" style="text-align:center">
-      <div style="font-size:2rem;font-weight:700;color:var(--accent)">{{ attack_surface.get('endpoint_count', 0) }}</div>
-      <div class="muted">Endpoints Mapped</div>
-    </div>
-    <div class="card" style="text-align:center">
-      <div style="font-size:2rem;font-weight:700;color:var(--accent)">{{ attack_surface.get('live_host_count', 0) }}</div>
-      <div class="muted">Live Hosts</div>
-    </div>
-  </div>
-
-  {% set coverage = attack_surface.get('coverage', {}) %}
-  {% if coverage %}
-  <div class="card" style="margin-bottom:1rem">
-    <h3 style="margin:0 0 0.5rem">Coverage Checklist</h3>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0.5rem">
-      {% for check, label in [('subdomains_enumerated', 'Subdomains Enumerated'), ('endpoints_mapped', 'Endpoints Mapped'), ('api_specs_found', 'API Specs Found'), ('live_hosts_scanned', 'Live Hosts Scanned')] %}
-      <div style="display:flex;align-items:center;gap:0.4rem">
-        {% if coverage.get(check) %}<span style="color:var(--green)">&#10003;</span>{% else %}<span style="color:var(--muted)">&#10007;</span>{% endif %}
-        <span>{{ label }}</span>
-      </div>
-      {% endfor %}
-    </div>
+    {% endif %}
+    {% endfor %}
   </div>
   {% endif %}
 
-  {% if attack_surface.get('domains') %}
+  <!-- Dynamic sections -->
+  {% for section_key, section_val in attack_surface.items() %}
+  {% if section_key != 'coverage' or (section_val is mapping and section_val.values()|select('string')|list|length > 0) %}
   <div class="card" style="margin-bottom:1rem">
-    <h3 style="margin:0 0 0.5rem">Scope Domains</h3>
-    <div style="display:flex;flex-wrap:wrap;gap:0.3rem">
-      {% for d in attack_surface.domains %}
-      <span class="badge badge-gray">{{ d }}</span>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
-  {% if attack_surface.get('assessment_summary') %}
-  <div class="card" style="margin-bottom:1rem">
-    <h3 style="margin:0 0 0.5rem">Assessment Summary</h3>
-    <pre style="max-height:300px;overflow:auto;background:var(--surface);padding:0.8rem;border-radius:6px;font-size:0.8rem;white-space:pre-wrap">{{ attack_surface.assessment_summary }}</pre>
-  </div>
-  {% endif %}
-
-  {% if attack_surface.get('program_notes') %}
-  <div class="card" style="margin-bottom:1rem">
-    <h3 style="margin:0 0 0.5rem;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-      Program Notes <span class="muted" style="font-size:0.8rem">click to expand</span>
+    <h3 style="margin:0 0 0.5rem;display:flex;align-items:center;gap:0.5rem;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+      {{ section_key.replace('_', ' ').title() }}
+      {% if section_val is iterable and section_val is not string and section_val is not mapping %}
+        <span class="badge badge-blue">{{ section_val|length }}</span>
+      {% endif %}
+      <span class="muted" style="font-size:0.8rem">click to expand</span>
     </h3>
-    <pre style="display:none;max-height:400px;overflow:auto;background:var(--surface);padding:0.8rem;border-radius:6px;font-size:0.8rem;white-space:pre-wrap">{{ attack_surface.program_notes }}</pre>
+    <div style="display:none">
+      {% if section_val is mapping %}
+        {% for k, v in section_val.items() %}
+        {% if not (section_key == 'coverage' and v is number) %}
+        <div style="margin-bottom:0.8rem;border-left:2px solid var(--border);padding-left:0.8rem">
+          <div class="mono" style="font-size:0.8rem;font-weight:600;margin-bottom:0.3rem;color:var(--accent)">{{ k.replace('_', ' ').title() }}</div>
+          {% if v is iterable and v is not string and v is not mapping %}
+            <ul style="margin:0;padding-left:1.2rem;font-size:0.8rem">
+            {% for item in v %}
+              {% if item is mapping %}
+                <li style="margin-bottom:0.2rem"><pre style="margin:0;font-size:0.75rem;white-space:pre-wrap">{{ item|tojson(indent=2) }}</pre></li>
+              {% else %}
+                <li style="margin-bottom:0.2rem;color:var(--text)">{{ item }}</li>
+              {% endif %}
+            {% endfor %}
+            </ul>
+          {% elif v is mapping %}
+            <pre style="max-height:200px;overflow:auto;background:var(--surface);padding:0.5rem;border-radius:4px;font-size:0.75rem;margin:0.3rem 0;white-space:pre-wrap">{{ v|tojson(indent=2) }}</pre>
+          {% else %}
+            <div style="font-size:0.8rem;color:var(--text)">{{ v }}</div>
+          {% endif %}
+        </div>
+        {% endif %}
+        {% endfor %}
+      {% elif section_val is iterable and section_val is not string %}
+        {% for item in section_val %}
+        <div style="margin-bottom:0.5rem;border-left:2px solid var(--border);padding-left:0.8rem">
+          {% if item is mapping %}
+            <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+              {% if item.title is defined %}<span style="font-size:0.85rem;font-weight:600">{{ item.title }}</span>{% endif %}
+              {% if item.severity is defined %}<span class="badge {{ 'badge-red' if item.severity in ['critical','high'] else 'badge-yellow' if item.severity == 'medium' else 'badge-gray' }}">{{ item.severity }}</span>{% endif %}
+              {% if item.status is defined %}<span class="badge badge-blue">{{ item.status }}</span>{% endif %}
+              {% if item.priority is defined %}<span class="badge badge-gray">{{ item.priority }}</span>{% endif %}
+              {% if item.vector is defined %}<span style="font-size:0.85rem;font-weight:600">{{ item.vector }}</span>{% endif %}
+              {% if item.agent is defined %}<span class="badge badge-blue">{{ item.agent }}</span>{% endif %}
+            </div>
+            {% set extra_keys = [] %}
+            {% for ik, iv in item.items() if ik not in ['title','severity','status','priority','vector','agent','id'] %}
+              {% if extra_keys.append(1) %}{% endif %}
+              <div style="font-size:0.75rem;color:var(--muted)">{{ ik }}: {{ iv }}</div>
+            {% endfor %}
+          {% else %}
+            <div style="font-size:0.85rem;color:var(--text)">{{ item }}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <pre style="max-height:300px;overflow:auto;background:var(--surface);padding:0.8rem;border-radius:6px;font-size:0.8rem;white-space:pre-wrap">{{ section_val }}</pre>
+      {% endif %}
+    </div>
   </div>
   {% endif %}
+  {% endfor %}
 {% else %}
 <div class="insight-box">No attack surface data available.</div>
 {% endif %}
