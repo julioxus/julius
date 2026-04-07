@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "bounty-intel": {
+      "command": "./run_bounty_intel.sh",
+      "description": "Bounty Intel - Bug bounty operations: programs, findings, reports, recon, submissions, payouts, hunt memory, forecasts",
+      "timeout": 60
+    }
+  }
+}

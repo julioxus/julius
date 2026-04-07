@@ -1,0 +1,20 @@
+{
+  "name": "julius-local",
+  "interface": {
+    "displayName": "Julius Local Plugins"
+  },
+  "plugins": [
+    {
+      "name": "julius",
+      "source": {
+        "source": "local",
+        "path": "./plugins/julius"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

@@ -6,7 +6,7 @@
 [![Claude AI](https://img.shields.io/badge/Powered%20by-Claude%20AI-blue)](https://claude.ai)
 [![GitHub issues](https://img.shields.io/github/issues/CroquetteHunters/julius)](https://github.com/CroquetteHunters/julius/issues)
 
-**Claude Code skills, agents, and tools for penetration testing, bug bounty hunting, and vulnerability management**
+**Claude Code and Codex skills, agents, and tools for penetration testing, bug bounty hunting, and vulnerability management**
 
 </div>
 
@@ -14,7 +14,31 @@
 
 ## What is Julius?
 
-Julius is a security testing toolkit built as **Claude Code skills and agents**. It provides AI-orchestrated workflows for pentesting, bug bounty programs, and vulnerability management — all invoked via slash commands inside Claude Code. `/pentest` is the canonical testing engine, invoked by `/hackerone`, `/intigriti`, and `/defectdojo` as sub-orchestrator.
+Julius is a security testing toolkit built around **Claude Code workflows** and also adapted to be usable from **Codex**. It provides AI-orchestrated workflows for pentesting, bug bounty programs, and vulnerability management. In Claude, the main entrypoints are slash commands such as `/pentest`, `/hackerone`, `/intigriti`, and `/defectdojo`. In Codex, the same workflows are exposed through repo-local skills under `.agents/skills/`.
+
+## Using Julius From Codex
+
+Codex does not rely on Claude-style slash commands. Instead, this repo exposes Codex-native skills that map to the existing Julius workflows:
+
+- `.agents/skills/julius/` - compatibility bridge for the whole toolkit
+- `.agents/skills/pentest/` - maps to `.claude/skills/pentest/`
+- `.agents/skills/hackerone/` - maps to `.claude/skills/hackerone/`
+- `.agents/skills/intigriti/` - maps to `.claude/skills/intigriti/`
+- `.agents/skills/defectdojo/` - maps to `.claude/skills/defectdojo/`
+- `plugins/julius/` - repo-local Codex plugin exposing the `bounty-intel` MCP server
+- `.agents/plugins/marketplace.json` - local marketplace entry for the Julius plugin
+
+Practical effect:
+
+- In Claude: use `/pentest`, `/hackerone`, `/intigriti`, `/defectdojo`
+- In Codex: ask naturally for the same workflow, for example `usa Julius para un pentest` or `ejecuta el flujo de HackerOne`
+
+The Codex skills are thin wrappers. They reuse the existing `.claude/skills/` and `.claude/agents/` documents as the canonical workflow definitions instead of duplicating them, so Claude Code remains fully supported.
+
+For Codex, the recommended setup is:
+
+- use `.agents/skills/` for workflow discovery and intent mapping
+- use the local `julius` plugin for MCP-backed Bounty Intel access
 
 Built on top of [Transilience AI Community Tools](https://github.com/transilienceai/communitytools).
 

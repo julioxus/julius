@@ -1,0 +1,40 @@
+{
+  "name": "julius",
+  "version": "0.1.0",
+  "description": "Julius security testing workflows and Bounty Intel MCP integration for Codex.",
+  "author": {
+    "name": "CroquetteHunters",
+    "url": "https://github.com/CroquetteHunters/julius"
+  },
+  "homepage": "https://github.com/CroquetteHunters/julius",
+  "repository": "https://github.com/CroquetteHunters/julius",
+  "license": "MIT",
+  "keywords": [
+    "security",
+    "pentest",
+    "bug-bounty",
+    "codex",
+    "mcp"
+  ],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Julius",
+    "shortDescription": "Security workflows and bounty intel for Codex",
+    "longDescription": "Repo-local Codex plugin that exposes the Julius Bounty Intel MCP server and complements the Julius security workflow skills in .agents/skills.",
+    "developerName": "CroquetteHunters",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/CroquetteHunters/julius",
+    "privacyPolicyURL": "https://github.com/CroquetteHunters/julius/blob/main/README.md",
+    "termsOfServiceURL": "https://github.com/CroquetteHunters/julius/blob/main/LICENSE",
+    "defaultPrompt": [
+      "Usa Julius para un pentest de esta URL.",
+      "Ejecuta el flujo de HackerOne para este programa.",
+      "Consulta findings o recon desde Bounty Intel."
+    ],
+    "brandColor": "#0F766E"
+  }
+}
