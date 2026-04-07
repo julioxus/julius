@@ -9,7 +9,7 @@
   <div class="actions">
     <span class="badge {{ status_badge(program.status) }}">{{ program.status }}</span>
     <a href="{{ program_platform_url(program.platform, program.platform_handle) }}" target="_blank"
-       class="badge badge-{% if program.platform == 'hackerone' %}blue{% else %}purple{% endif %}"
+       class="badge {{ platform_badge(program.platform) }}"
        style="text-decoration:none">{{ program.platform }} &nearr;</a>
   </div>
 </div>

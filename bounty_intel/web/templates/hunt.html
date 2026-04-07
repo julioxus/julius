@@ -38,7 +38,7 @@
   {% for platform, ps in platform_stats.items() %}
   <div class="card" style="padding:1rem">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
-      <span class="badge badge-{% if platform == 'hackerone' %}blue{% else %}purple{% endif %}" style="font-size:0.9rem">{{ platform }}</span>
+      <span class="badge {{ platform_badge(platform) }}" style="font-size:0.9rem">{{ platform }}</span>
       <span class="mono">{{ ps.total }} subs</span>
     </div>
     <div style="display:flex;gap:1.5rem;font-size:0.85rem">
@@ -67,7 +67,7 @@
     {% for pp in program_perf %}
     <tr{% if pp.rate == 0 and pp.rejected > 0 %} style="opacity:0.5"{% endif %}>
       <td><strong>{{ pp.name }}</strong></td>
-      <td><span class="badge badge-{% if pp.platform == 'hackerone' %}blue{% else %}purple{% endif %}">{{ pp.platform }}</span></td>
+      <td><span class="badge {{ platform_badge(pp.platform) }}">{{ pp.platform }}</span></td>
       <td class="mono">{{ pp.total }}</td>
       <td class="mono green">{{ pp.resolved + pp.accepted }}</td>
       <td class="mono red">{{ pp.rejected }}</td>

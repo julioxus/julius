@@ -47,6 +47,7 @@ import os
 os.environ.setdefault("AUTHLIB_INSECURE_TRANSPORT", "0")  # ensure secure
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+templates.env.globals["platform_badge"] = lambda p: {"hackerone": "badge-blue", "intigriti": "badge-purple", "custom": "badge-orange"}.get(p, "badge-gray")
 
 
 def _render(request: Request, template: str, context: dict) -> HTMLResponse:
@@ -111,6 +112,10 @@ def _company_logo_url(program) -> str:
     if not domain:
         return ""
     return f"https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://{domain}&size=64"
+
+
+def _platform_badge(platform: str) -> str:
+    return {"hackerone": "badge-blue", "intigriti": "badge-purple", "custom": "badge-orange"}.get(platform, "badge-gray")
 
 
 def _badge_class(disposition: str) -> str:

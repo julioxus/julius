@@ -153,6 +153,24 @@ async def upsert_program(data: ProgramIn):
     return {"id": pid}
 
 
+@router.patch("/programs/{program_id}", dependencies=[Depends(verify_api_key)])
+async def update_program(program_id: int, data: dict):
+    from bounty_intel.db import Program, get_session
+    session = get_session()
+    program = session.get(Program, program_id)
+    if not program:
+        session.close()
+        raise HTTPException(404, "Program not found")
+    allowed = {"platform", "company_name", "platform_handle", "status", "bounty_type", "notes", "tech_stack", "scope", "oos_rules", "logo_url"}
+    for k, v in data.items():
+        if k in allowed:
+            setattr(program, k, v)
+    session.commit()
+    result = {"id": program.id, "platform": program.platform, "company_name": program.company_name}
+    session.close()
+    return result
+
+
 # ── Engagements ──────────────────────────────────────────────
 @router.get("/engagements/{platform}/{handle}", dependencies=[Depends(verify_api_key)])
 async def get_engagement(platform: str, handle: str):

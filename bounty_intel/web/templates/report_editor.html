@@ -16,7 +16,7 @@
     {% else %}
     <span class="badge {{ status_badge(report.status) }}" style="font-size:0.9rem;padding:4px 12px">{{ report.status }}</span>
     {% endif %}
-    <span class="badge badge-{% if report.platform == 'hackerone' %}blue{% else %}purple{% endif %}" style="font-size:0.9rem;padding:4px 12px">{{ report.platform }}</span>
+    <span class="badge {{ platform_badge(report.platform) }}" style="font-size:0.9rem;padding:4px 12px">{{ report.platform }}</span>
   </div>
 </div>
 

@@ -20,6 +20,7 @@
       <option value="">All Platforms</option>
       <option value="hackerone" {% if filter_platform == 'hackerone' %}selected{% endif %}>HackerOne</option>
       <option value="intigriti" {% if filter_platform == 'intigriti' %}selected{% endif %}>Intigriti</option>
+      <option value="custom" {% if filter_platform == 'custom' %}selected{% endif %}>Custom</option>
     </select>
     <select name="status" class="filter-select">
       <option value="">All Statuses</option>
@@ -63,7 +64,7 @@
         {% set logo = company_logo_url(p.program) %}{% if logo %}<img src="{{ logo }}" alt="" class="company-logo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><span class="logo-fallback" style="display:none">{{ p.program.company_name[0] }}</span>{% else %}<span class="logo-fallback" style="display:flex">{{ p.program.company_name[0] }}</span>{% endif %}
         <strong>{{ p.program.company_name }}</strong>
       </td>
-      <td><span class="badge badge-{% if p.program.platform == 'hackerone' %}blue{% else %}purple{% endif %}">{{ p.program.platform }}</span></td>
+      <td><span class="badge {{ platform_badge(p.program.platform) }}">{{ p.program.platform }}</span></td>
       <td><span class="badge {{ status_badge(p.program.status) }}">{{ p.program.status }}</span></td>
       <td class="mono">{{ p.sub_count }}</td>
       <td class="mono green">{{ p.paid_count }}</td>

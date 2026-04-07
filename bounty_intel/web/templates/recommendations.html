@@ -28,7 +28,7 @@
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.8rem">
     <div>
       <strong style="font-size:1.1rem">{{ name }}</strong>
-      <span class="badge badge-{% if pa.platform == 'hackerone' %}blue{% else %}purple{% endif %}" style="margin-left:0.4rem">{{ pa.platform }}</span>
+      <span class="badge {{ platform_badge(pa.platform) }}" style="margin-left:0.4rem">{{ pa.platform }}</span>
       {% if pa.get('acceptance_rate') is not none %}
         <span class="badge {% if pa.acceptance_rate > 0.3 %}badge-green{% elif pa.acceptance_rate > 0 %}badge-yellow{% else %}badge-red{% endif %}" style="margin-left:0.3rem">
           {{ "%.0f"|format(pa.acceptance_rate * 100) }}% accepted
