@@ -216,6 +216,10 @@ class BountyIntelClient:
         """Get signed download URL for an evidence file."""
         return self._get(f"/api/v1/evidence/{evidence_id}/url")
 
+    def delete_evidence(self, evidence_id: int) -> dict:
+        """Delete an evidence file. Removes both database record and GCS file."""
+        return self._delete(f"/api/v1/evidence/{evidence_id}")
+
     # ------------------------------------------------------------------
     # Payouts
     # ------------------------------------------------------------------

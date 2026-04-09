@@ -628,6 +628,39 @@ async def get_evidence_url(evidence_id: int):
     return {"url": url, "filename": ef.filename}
 
 
+# ── Evidence Delete ─────────────────────────────────────────
+@router.delete("/evidence/{evidence_id}", dependencies=[Depends(verify_api_key)])
+async def delete_evidence(evidence_id: int):
+    """Delete an evidence file. Removes both DB record and GCS file if exists."""
+    from bounty_intel.db import EvidenceFile, get_session
+    from bounty_intel.evidence.uploader import delete_from_gcs
+
+    session = get_session()
+    ef = session.get(EvidenceFile, evidence_id)
+    if not ef:
+        session.close()
+        raise HTTPException(404, "Evidence file not found")
+
+    # Store info for response
+    filename = ef.filename
+    gcs_path = ef.gcs_path
+
+    # Delete from GCS if exists
+    if gcs_path:
+        try:
+            delete_from_gcs(gcs_path)
+        except Exception as e:
+            # Log error but continue with DB deletion
+            print(f"Warning: Failed to delete {gcs_path} from GCS: {e}")
+
+    # Delete from database
+    session.delete(ef)
+    session.commit()
+    session.close()
+
+    return {"ok": True, "deleted_evidence_id": evidence_id, "filename": filename}
+
+
 # ── Evidence backfill helpers ───────────────────────────────
 @router.get("/evidence/needs-backfill", dependencies=[Depends(verify_api_key)])
 async def evidence_needs_backfill(limit: int = 500, offset: int = 0):
