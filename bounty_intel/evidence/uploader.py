@@ -87,3 +87,24 @@ def generate_signed_url(gcs_path: str, expiration_seconds: int | None = None) ->
         service_account_email=sa_email,
         access_token=credentials.token,
     )
+
+
+def delete_from_gcs(gcs_path: str) -> bool:
+    """Delete a file from Google Cloud Storage."""
+    from google.cloud import storage
+
+    try:
+        bucket_name = gcs_path.split("/")[2]
+        blob_name = "/".join(gcs_path.split("/")[3:])
+
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+
+        # Delete the blob
+        blob.delete()
+        return True
+
+    except Exception as e:
+        print(f"Failed to delete {gcs_path} from GCS: {e}")
+        return False

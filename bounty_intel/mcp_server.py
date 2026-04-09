@@ -570,6 +570,17 @@ def bounty_get_evidence_url(evidence_id: int) -> dict:
     return _safe_call(c.get_evidence_url, evidence_id)
 
 
+@mcp.tool()
+def bounty_delete_evidence(evidence_id: int) -> dict:
+    """Delete an evidence file. Removes both database record and GCS file.
+
+    Use to remove obsolete, incorrect, or unwanted evidence files.
+    This action cannot be undone.
+    """
+    c = _get_client()
+    return _safe_call(c.delete_evidence, evidence_id)
+
+
 # ── Activity (2) ─────────────────────────────────────────────
 
 
