@@ -87,34 +87,19 @@
 
 ## Testing Methodologies
 
-**PTES** (7 phases): Pre-engagement → Intelligence → Threat modeling → Vulnerability analysis → Exploitation → Post-exploitation → Reporting
+PTES (7 phases) | OWASP WSTG (11 categories) | MITRE ATT&CK (14 tactics) | Flaw Hypothesis (stack→predict→test→correlate)
 
-**OWASP WSTG**: 11 categories covering info gathering → client-side security
-
-**MITRE ATT&CK**: Reconnaissance → Initial Access → Execution → Persistence → Privilege Escalation → Defense Evasion → Credential Access → Discovery → Lateral Movement → Collection → C2 → Exfiltration → Impact
-
-**Flaw Hypothesis**: Stack analysis → Predict vulnerabilities → Test → Generalize → Correlate findings → Report
-
-[Reference: `.claude/skills/pentest/attacks/essential-skills/methodology/`]
+[Details: `.claude/skills/pentest/attacks/essential-skills/methodology/`]
 
 ---
 
-## CVSS v3.1 Quick Reference
+## CVSS v3.1
 
-| Component | Values |
-|-----------|--------|
-| **Attack Vector** | Network (0.85), Adjacent (0.62), Local (0.55), Physical (0.2) |
-| **Attack Complexity** | Low (0.77), High (0.44) |
-| **Privileges Required** | None (0.85), Low (0.62), High (0.27) |
-| **User Interaction** | None (0.85), Required (0.62) |
-| **Scope** | Unchanged, Changed |
-| **Impact (C/I/A)** | None (0), Low (0.22), High (0.56) |
+**MANDATORY**: Always compute CVSS scores using a calculator (Python/bash). NEVER guess — formulas are non-linear. Run calculation BEFORE writing any score.
 
-**Severity**: None (0.0) | Low (0.1-3.9) | Medium (4.0-6.9) | High (7.0-8.9) | Critical (9.0-10.0)
+Severity bands: None (0.0) | Low (0.1-3.9) | Medium (4.0-6.9) | High (7.0-8.9) | Critical (9.0-10.0)
 
-**MANDATORY: Always compute CVSS scores using a calculator (Python/bash). NEVER guess or estimate — the formulas are non-linear and guessing produces wrong scores. Run the calculation BEFORE writing any score in a report.**
-
-[Details: `.claude/output-standards/reference/CVSS_SCORING.md`]
+[Component values + calculator: `.claude/output-standards/reference/CVSS_SCORING.md`]
 
 ---
 
@@ -124,108 +109,31 @@ A01: Broken Access Control | A02: Cryptographic Failures | A03: Injection | A04:
 ---
 
 ## Common Tools
-- **Playwright**: Browser automation, payload injection, evidence capture [`.claude/skills/pentest/attacks/essential-skills/playwright-automation.md`]
-- **Burp Suite MCP**: Active scanning, Collaborator OOB, traffic replay via PortSwigger MCP [`.claude/skills/tools/burp-suite/`]
-- **MobSF MCP**: Mobile static analysis (APK/IPA) via MobSF API [`.claude/skills/infrastructure/mobile-security/`]
-- **Frida MCP**: Dynamic instrumentation, hooking, runtime analysis [`.claude/skills/infrastructure/mobile-security/`]
-- **HexStrike AI MCP**: 150+ security tools via MCP (nmap, nuclei, sqlmap, gobuster, ghidra, prowler, etc.) + 12 AI agents for intelligent orchestration [`.claude/skills/tools/hexstrike/`]
-- **sqlmap**: `sqlmap -u "URL" -p param --dbs` | HexStrike: `sqlmap_scan(url, params)`
-- **nuclei**: `nuclei -u target -t cves/` | HexStrike: `nuclei_scan(target, templates)`
-- **ffuf**: `ffuf -u https://target/FUZZ -w wordlist.txt` | HexStrike: `ffuf_scan(url, wordlist)`
-- **nmap**: `nmap -sC -sV -oA output target` | HexStrike: `nmap_scan(target, options)`
+Playwright (browser automation) | Burp Suite MCP (scanning, Collaborator, replay) | MobSF MCP (APK/IPA static) | Frida MCP (dynamic instrumentation) | HexStrike AI MCP (150+ tools: nmap, nuclei, sqlmap, ffuf, gobuster, ghidra, prowler + 12 AI agents)
+
+[Tool details: `.claude/skills/tools/` and `.claude/skills/infrastructure/`]
 
 ---
 
 ## Bug Bounty Reporting Policy (MANDATORY)
 
 ### Gate: No PoC = No Report
-- **NEVER report theoretical/potential vulnerabilities** — every finding MUST have a working PoC demonstrating real exploitable impact
-- `poc.py` - Runnable exploit with args
-- `poc_output.txt` - Execution proof + timestamp
-- `workflow.md` - Manual reproduction steps
-- Evidence: Screenshots, videos, network logs
-- If you cannot demonstrate exploitation → **DROP the finding, do not report it**
+Every finding MUST have: `poc.py` (runnable) + `poc_output.txt` (proof) + `workflow.md` (repro steps) + evidence (screenshots/videos/logs). No working PoC → **DROP the finding**.
 
-### Typically Out-of-Scope (Do NOT Report)
-These are almost universally excluded from bug bounty programs. Do not waste time testing or reporting them:
-- **CORS misconfigurations** — unless leading to actual data exfiltration with PoC
-- **Missing security headers** (X-Frame-Options, X-Content-Type-Options, CSP, etc.)
-- **Missing HSTS** / HSTS not on preload list
-- **Email spoofing** / missing SPF/DKIM/DMARC
-- **Clickjacking** on non-sensitive pages (no state-changing action)
-- **CSRF on logout** or non-sensitive forms
-- **Rate limiting** absence (login, API) — unless leading to account takeover with PoC
-- **Username/email enumeration** via login/register responses
-- **Self-XSS** (only affects the attacker's own session)
-- **HTTP 404/403 page content** / stack traces without sensitive data
-- **Version disclosure** / server banner information
-- **SSL/TLS configuration issues** (weak ciphers, certificate warnings)
-- **Open redirects** — unless chained with OAuth/SSO for token theft
-- **Best practice violations** without demonstrated security impact
-- **Denial of Service** (DoS/DDoS)
-- **Social engineering** / phishing
-- **Physical security** issues
-- **Vulnerabilities in out-of-scope assets** or third-party services
-
-**See also**: `/bounty-validation` Never-Submit List for the full conditional validity table — each item above becomes valid ONLY when chained (see table for exact conditions).
+### Out-of-Scope (Do NOT Report Unless Chained)
+CORS, missing headers (XFO/CSP/HSTS), SPF/DKIM/DMARC, clickjacking (no state change), CSRF on logout, rate limiting, user enumeration, self-XSS, version disclosure, SSL/TLS config, open redirects (unless OAuth chain), DoS, social engineering, physical, OOS assets. Each becomes valid ONLY when chained to real impact — see `/bounty-validation` Never-Submit List.
 
 ### AI Usage Compliance (MANDATORY)
+**Pre-submit gates**: Personally verified on live target | All technical details accurate | Zero fabricated content | Can explain root cause without AI | AI disclosure included.
 
-All bug bounty submissions that involve AI assistance MUST comply with platform code of conduct:
+**AI Disclosure** (required in every submission):
+> AI tools used for: [specific uses]. All findings independently discovered, verified, and validated by the researcher.
 
-**Pre-Submission Verification Checklist** (ALL must be TRUE before submitting):
-- [ ] **Personally verified**: Vulnerability was directly discovered, tested, and understood by the researcher — not blindly accepted from AI output
-- [ ] **Accuracy confirmed**: All technical details (endpoints, parameters, responses, versions) verified against the live target
-- [ ] **No fabricated content**: Zero invented endpoints, placeholder text, generic exploit templates, or references to non-existent features
-- [ ] **Understanding demonstrated**: Researcher can explain the root cause, impact, and fix without AI assistance
-- [ ] **AI disclosure included**: Submission contains transparent disclosure of how AI was used
+**Hard gates** (block submission): AI-only finding without manual verification | Non-existent endpoints/params | Placeholder PoC values | Cannot explain root cause | Inflated CVSS. Enforcement: Phase 4 (Validation) + Phase 6 (Review).
 
-**AI Disclosure Section** (REQUIRED in every AI-assisted submission):
-```markdown
-## AI Assistance Disclosure
-AI tools were used in this submission for: [list specific uses, e.g., code analysis, report structuring, payload generation].
-All findings were independently discovered, verified, and validated by the researcher against the live target.
-```
-
-**Hard Gates** — Block submission if ANY of these are true:
-- Finding was generated entirely by AI without manual verification on the target
-- Report contains endpoints/parameters that don't exist on the target
-- PoC uses placeholder values (e.g., `example.com`, `CHANGE_ME`, `TODO`) instead of real target data
-- Researcher cannot explain the vulnerability's root cause when questioned
-- CVSS score is inflated beyond what the PoC actually demonstrates
-
-**Enforcement**: These checks apply in Phase 4 (Validation) and Phase 6 (Review) of all bug bounty workflows. Any finding that fails verification MUST be dropped — do not submit it.
-
-### Reporting Quality Standard
-**Report Format**: Title | CVSS | CWE/OWASP | Reproduction steps | Impact | Remediation
-**Output Structure**: `outputs/<target>/findings/{finding-NNN/{poc.py, poc_output.txt, workflow.md}} + reports/{executive-summary.md, technical-report.md}`
-
-[Complete spec: `.claude/OUTPUT_STANDARDS.md` lines 258-357]
+### Reporting Quality
+Format: Title | CVSS | CWE/OWASP | Reproduction | Impact | Remediation — [Full spec: `.claude/OUTPUT_STANDARDS.md`]
 
 ---
 
-## Skills Directory
-
-| Skill | Purpose |
-|-------|---------|
-| `/pentest` | Comprehensive penetration testing orchestration |
-| `/hackerone` | Bug bounty workflow automation (scope → testing → reporting) |
-| `/intigriti` | Intigriti bug bounty workflow automation (scope → testing → reporting) |
-| `/burp-suite` | Burp Suite integration (scanning, Collaborator, PoC replay) |
-| `/mobile-security` | Mobile app security (MobSF static + Frida dynamic analysis) |
-| `/cloud-security` | Cloud security assessment (AWS, Azure, GCP) |
-| `/container-security` | Container security (Docker, Kubernetes) |
-| `/authenticating` | Authentication security testing (signup, login, 2FA, CAPTCHA) |
-| `/ai-threat-testing` | LLM security testing (prompt injection, model extraction) |
-| `/common-appsec-patterns` | XSS, injection, client-side vulnerability testing |
-| `/cve-testing` | CVE identification and exploitation |
-| `/domain-assessment` | Subdomain discovery & port scanning |
-| `/hexstrike` | HexStrike AI MCP - 150+ tools, 12 AI agents, automated workflows |
-| `/defectdojo` | DefectDojo vulnerability management (import findings, manage engagements) |
-| `/web-application-mapping` | Web app reconnaissance |
-| `/autopilot` | Autonomous hunt loop with checkpoint modes (paranoid/normal/yolo) |
-| `/web3-audit` | Smart contract security audit (Solidity, Vyper, 10 vulnerability classes) |
-
----
-
-*Version: 2.0 | Simplified knowledge base | 2026-02-02*
+*Version: 2.1 | Token-optimized | 2026-04-09*
