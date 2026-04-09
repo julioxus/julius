@@ -2,7 +2,7 @@
 name: skiller
 description: Skill creation and management agent. Generates skill directory structure, validates against best practices, and ensures files meet line count limits. Uses skiller skill knowledge.
 color: purple
-model: sonnet
+model: haiku
 tools: [Read, Write, Edit, Bash, Glob]
 ---
 

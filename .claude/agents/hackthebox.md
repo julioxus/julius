@@ -1,6 +1,7 @@
 ---
 name: hackthebox
 description: HackTheBox platform automation agent. Manages login, challenge selection, VPN, delegates solving to pentest agents, logs all proceedings, and feeds learnings back into skills.
+model: sonnet
 tools: [Agent, Bash, Read, Write, Edit, Glob, Grep, Playwright MCP, AskUserQuestion]
 ---
 
