@@ -1109,45 +1109,17 @@ async def trigger_sync(request: Request):
 
 @app.post("/sync/intigriti")
 async def trigger_intigriti_sync(request: Request):
-    """Sync Intigriti using automatic session detection or manual cookie."""
-    form = await request.form()
-    manual_cookie = form.get("cookie", "").strip()
+    """Sync Intigriti using configured credentials."""
+    from bounty_intel.sync.delta import sync_all
 
-    # Try automatic session detection first
-    if not manual_cookie:
-        try:
-            import sys
-            from pathlib import Path
-            auth_tools = str(Path(__file__).resolve().parents[1] / ".claude" / "skills" / "intigriti" / "tools")
-            if auth_tools not in sys.path:
-                sys.path.insert(0, auth_tools)
-            from intigriti_auth import get_session_cookie
-            cookie = get_session_cookie()
-            if not cookie:
-                return HTMLResponse("<span class='badge badge-red'>Auto-detection failed - no browser session found</span>")
-        except Exception as e:
-            return HTMLResponse(f"<span class='badge badge-red'>Auto-detection failed: {str(e)}</span>")
-    else:
-        # Use manual cookie if provided
-        cookie = manual_cookie
-
-    # Validate cookie works
-    from bounty_intel.sync.intigriti import _validate_cookie, sync as inti_sync
-    if not _validate_cookie(cookie):
-        return HTMLResponse("<span class='badge badge-red'>Cookie invalid or expired</span>")
-
-    # Store cookie for this sync (temporarily set in settings)
-    import bounty_intel.config
-    bounty_intel.config.settings.intigriti_cookie = cookie
-
-    # Run sync
-    result = inti_sync()
-    upserted = result.get("upserted", 0)
+    results = sync_all(sources=["intigriti"])
+    intigriti_result = results.get("intigriti", {})
+    upserted = intigriti_result.get("upserted", 0)
 
     # Update watermark
-    if result.get("max_updated"):
+    if intigriti_result.get("max_updated"):
         from bounty_intel import service
-        service.update_sync_state("intigriti", result["max_updated"])
+        service.update_sync_state("intigriti", intigriti_result["max_updated"])
 
     return HTMLResponse(
         content=f"<span class='badge badge-green'>Intigriti: {upserted} synced</span>",
