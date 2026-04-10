@@ -306,7 +306,7 @@ findings/finding-NNN/
 ### Output Path Compliance (MANDATORY)
 ```bash
 # Use standardized output paths - NEVER hardcode paths
-from VALIDATION_CHECKLIST import get_engagement_output_path, validate_output_path
+from tools.validation_gates import get_output_path, validate_output_path
 
 evidence_path = get_engagement_output_path(engagement_name, "evidence", "dom-xss-confirmed.png", finding_id)
 validate_output_path(evidence_path, engagement_name)

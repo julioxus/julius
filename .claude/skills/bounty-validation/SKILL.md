@@ -215,53 +215,18 @@ Both HackerOne and Intigriti permit AI tools but require responsible use. **Ever
 
 **Reports that violate these rules will be closed without response and may lead to platform removal.**
 
-## 🔒 MANDATORY VALIDATION REQUIREMENTS (NEW - ENFORCED PROJECT-WIDE)
+## Validation Implementation
 
-Before ANY external communication (emails, reports, submissions):
-
-```python
-# REQUIRED AT TOP OF ALL SKILLS:
-from VALIDATION_CHECKLIST import MandatoryValidator
-
-# REQUIRED BEFORE ANY FINDING SUBMISSION:
-try:
-    MandatoryValidator.validate_finding_before_report(finding_data, engagement_name)
-    print("✅ All validation gates passed")
-except ValidationError as e:
-    print(f"❌ VALIDATION FAILED: {e}")
-    print("🚫 SUBMISSION BLOCKED - Fix issues before proceeding")
-    return False
-```
-
-**5 Validation Gates (ALL MUST PASS):**
-1. **Infrastructure Reality Check** — Verify target is functional application, not placeholder server
-2. **Behavior Differentiation Test** — Valid vs invalid inputs produce different responses  
-3. **End-to-End Impact Proof** — Screenshots and evidence of actual exploitation demonstrated
-4. **Business Logic Verification** — Behavior is NOT intended/by design
-5. **Live Revalidation** — Vulnerability still exists within 2h of external communication
-
-**Output Structure Compliance:**
-- Evidence files → `outputs/{engagement}/reports/appendix/{finding-id}/`  
-- PoC files → `outputs/{engagement}/processed/findings/{finding-id}/`
-- Data files → `outputs/{engagement}/data/{type}/`
-- Logs → `outputs/{engagement}/logs/`
-
-**Emergency Halt Conditions (NEVER submit if detected):**
-- All endpoints return identical responses ("OK" to everything)
-- OAuth flows without external redirects  
-- Claims without end-to-end proof
-- "Could lead to" statements without demonstration
+Validation gates are implemented in `tools/validation_gates.py`. Output paths follow `.claude/OUTPUT_STANDARDS.md`.
 
 ```python
-# MANDATORY: Use standardized output paths
-from VALIDATION_CHECKLIST import get_engagement_output_path, validate_output_path
+from tools.validation_gates import MandatoryValidator, check_never_submit
 
-def write_evidence_file(engagement_name: str, finding_id: str, filename: str, content: str):
-    evidence_path = get_engagement_output_path(engagement_name, "evidence", filename, finding_id)
-    validate_output_path(evidence_path, engagement_name)
-    os.makedirs(os.path.dirname(evidence_path), exist_ok=True)
-    with open(evidence_path, 'w') as f:
-        f.write(content)
+result = MandatoryValidator.validate(finding_data, engagement_name)
+if not result["passed"]:
+    # BLOCKED — fix errors before submission
+    for err in result["errors"]:
+        print(f"BLOCKED: {err}")
 ```
 
 ## Quality Checklist

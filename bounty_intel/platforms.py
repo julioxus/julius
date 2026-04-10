@@ -373,8 +373,17 @@ def _normalize_bugcrowd_scope(raw: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def search_bugcrowd_programs(*, status: str = "", limit: int = 50, comprehensive: bool = True) -> list[dict]:
-    """List Bugcrowd programs with comprehensive auto-discovery. Returns normalized dicts."""
-    # Try API first (likely to fail for most users)
+    """List Bugcrowd programs via engagements.json API. Fast, paginated, real bounty data."""
+    # Primary method: JSON API (no Playwright needed, works with session cookies)
+    programs = _fetch_bugcrowd_engagements_json(limit=limit)
+    if programs:
+        if status:
+            status_lower = status.lower()
+            programs = [p for p in programs if p.get("status", "").lower() == status_lower]
+        print(f"[platforms] Found {len(programs)} Bugcrowd programs via JSON API")
+        return programs
+
+    # Fallback: official API (if credentials configured)
     if settings.bugcrowd_email and settings.bugcrowd_token:
         url = f"{_BUGCROWD_BASE}/programs?limit={limit}"
         data = _api_get(url, _bugcrowd_headers())
@@ -383,66 +392,96 @@ def search_bugcrowd_programs(*, status: str = "", limit: int = 50, comprehensive
             if isinstance(programs_raw, list):
                 programs = [_normalize_bugcrowd_program(p) for p in programs_raw]
                 if status:
-                    status_lower = status.lower()
-                    programs = [p for p in programs if p["status"] == status_lower]
-                print(f"[platforms] Found {len(programs)} programs via Bugcrowd API")
+                    programs = [p for p in programs if p["status"] == status.lower()]
+                print(f"[platforms] Found {len(programs)} programs via Bugcrowd credentials API")
                 return programs
 
-    # Primary method: Browser automation with comprehensive discovery (finds 38+ programs)
-    print("[platforms] Bugcrowd API not available, trying browser automation...")
-    try:
-        programs = _scrape_bugcrowd_programs(limit=limit, status=status, comprehensive=comprehensive)
-        if programs:
-            discovery_type = "comprehensive" if comprehensive else "standard"
-            print(f"[platforms] Found {len(programs)} programs via {discovery_type} browser automation")
-            return programs
-    except Exception as e:
-        print(f"[platforms] Browser automation failed: {e}")
-
-    # Fallback to known programs
-    print("[platforms] Using fallback known programs")
+    print("[platforms] No Bugcrowd data source available")
     return _fallback_bugcrowd_programs()
 
 
-def _scrape_bugcrowd_programs(limit: int = 50, status: str = "", authenticated: bool = True, comprehensive: bool = True) -> list[dict]:
-    """Use browser automation to discover Bugcrowd programs."""
-    try:
-        # Import the scraper (local to skill)
-        import sys
-        from pathlib import Path
+def _fetch_bugcrowd_engagements_json(limit: int = 300) -> list[dict]:
+    """Fetch programs from Bugcrowd's engagements.json API with pagination."""
+    import json as _json
+    from pathlib import Path
 
-        # Add the skill tools path
-        skill_tools = Path(__file__).parent.parent / ".claude" / "skills" / "bugcrowd" / "tools"
-        if str(skill_tools) not in sys.path:
-            sys.path.insert(0, str(skill_tools))
+    # Load session cookies
+    cookie_file = Path.home() / ".bugcrowd" / "session_cookies.json"
+    meta_file = Path.home() / ".bugcrowd" / "session_meta.json"
+    cookies = {}
+    if cookie_file.exists():
+        try:
+            import time
+            if meta_file.exists():
+                meta = _json.loads(meta_file.read_text())
+                if meta.get("expires_at", 0) > time.time():
+                    cookies = _json.loads(cookie_file.read_text())
+            else:
+                cookies = _json.loads(cookie_file.read_text())
+        except (_json.JSONDecodeError, KeyError):
+            pass
 
-        from bugcrowd_scraper import BugcrowdScraper
+    cookie_header = "; ".join(f"{k}={v}" for k, v in cookies.items()) if cookies else ""
 
-        # Create scraper with authenticated access
-        scraper = BugcrowdScraper(headless=True, authenticated=authenticated)
+    all_programs: list[dict] = []
+    page = 1
 
-        # Use comprehensive discovery for better results (finds 38+ vs 1-3 programs)
-        if comprehensive:
-            print("[platforms] Using comprehensive discovery for maximum program detection")
-            programs = scraper.comprehensive_discovery(limit=limit)
-        else:
-            print("[platforms] Using standard discovery")
-            programs = scraper.discover_programs(limit=limit)
+    while len(all_programs) < limit:
+        import urllib.request as _req
+        url = (f"https://bugcrowd.com/engagements.json"
+               f"?category=bug_bounty&page={page}&sort_by=promoted&sort_direction=desc")
+        req = _req.Request(url)
+        if cookie_header:
+            req.add_header("Cookie", cookie_header)
+        req.add_header("Accept", "application/json")
+        req.add_header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
 
-        # Filter by status if requested
-        if status:
-            status_lower = status.lower()
-            programs = [p for p in programs if p.get("status", "").lower() == status_lower]
+        try:
+            with _req.urlopen(req, timeout=15) as resp:
+                data = _json.loads(resp.read().decode())
+        except Exception as e:
+            print(f"[platforms] Bugcrowd JSON API error on page {page}: {e}")
+            break
 
-        print(f"[platforms] Found {len(programs)} Bugcrowd programs via {'comprehensive' if comprehensive else 'standard'} discovery")
-        return programs
+        engagements = data.get("engagements", [])
+        if not engagements:
+            break
 
-    except ImportError:
-        print("[platforms] Bugcrowd scraper not available - install playwright: pip install playwright && playwright install")
-        return []
-    except Exception as e:
-        print(f"[platforms] Scraping error: {e}")
-        return []
+        for eng in engagements:
+            rs = eng.get("rewardSummary") or {}
+            handle = (eng.get("briefUrl") or "").replace("/engagements/", "")
+            if not handle:
+                continue
+
+            def _parse_amt(s):
+                if not s: return 0.0
+                import re
+                m = re.search(r"[\d,]+", s.replace("$", ""))
+                return float(m.group().replace(",", "")) if m else 0.0
+
+            all_programs.append({
+                "platform": "bugcrowd",
+                "platform_id": handle,
+                "handle": handle,
+                "name": eng.get("name") or handle,
+                "status": "open" if eng.get("accessStatus") == "open" else "closed",
+                "program_type": "bounty",
+                "confidentiality": "private" if eng.get("isPrivate") else "public",
+                "min_bounty": _parse_amt(rs.get("minReward", "")),
+                "max_bounty": _parse_amt(rs.get("maxReward", "")),
+                "reward_summary": rs.get("summary", ""),
+                "currency": "USD",
+                "industry": eng.get("industryName") or "Unknown",
+                "service_level": eng.get("serviceLevel") or "",
+                "url": f"https://bugcrowd.com/engagements/{handle}",
+            })
+
+        total = data.get("paginationMeta", {}).get("totalCount", 0)
+        if len(all_programs) >= total:
+            break
+        page += 1
+
+    return all_programs[:limit]
 
 
 def _fallback_bugcrowd_programs() -> list[dict]:
@@ -473,65 +512,47 @@ def _fallback_bugcrowd_programs() -> list[dict]:
 
 def get_bugcrowd_program_detail(program_code: str) -> dict | None:
     """Get full Bugcrowd program detail including scope and rules."""
-    # Try API first (if available)
+    # Try engagements.json listing for basic info (fast, no Playwright)
+    programs = _fetch_bugcrowd_engagements_json(limit=300)
+    for p in programs:
+        if p.get("handle") == program_code:
+            print(f"[platforms] Got program info for {program_code} via JSON API")
+            return p
+
+    # Try official API (if credentials configured)
     if settings.bugcrowd_email and settings.bugcrowd_token:
         url = f"{_BUGCROWD_BASE}/programs/{program_code}"
         data = _api_get(url, _bugcrowd_headers())
         if data is not None:
             program = _normalize_bugcrowd_program(data)
-
-            # Get targets/scope
             targets_url = f"{_BUGCROWD_BASE}/programs/{program_code}/targets"
             targets_data = _api_get(targets_url, _bugcrowd_headers())
             if targets_data:
-                targets_list = targets_data.get("targets", [])
-                program["scope"] = [_normalize_bugcrowd_scope(t) for t in targets_list]
+                program["scope"] = [_normalize_bugcrowd_scope(t) for t in targets_data.get("targets", [])]
             else:
                 program["scope"] = []
-
             program["rules"] = data.get("brief", "") or data.get("description", "")
-            print(f"[platforms] Got program details for {program_code} via API")
+            print(f"[platforms] Got program details for {program_code} via credentials API")
             return program
 
-    # Try browser automation
-    print(f"[platforms] API not available, scraping program details for {program_code}...")
-    try:
-        program = _scrape_bugcrowd_program_detail(program_code)
-        if program and not program.get("manual_entry_required"):
-            print(f"[platforms] Got program details for {program_code} via scraping")
-            return program
-    except Exception as e:
-        print(f"[platforms] Scraping failed for {program_code}: {e}")
-
-    # Fallback to template
-    print(f"[platforms] Creating manual template for {program_code}")
-    return _create_manual_program_template(program_code)
-
-
-def _scrape_bugcrowd_program_detail(program_code: str, authenticated: bool = True) -> dict | None:
-    """Use browser automation to get program details."""
+    # Fallback: scraper with Playwright for scope/rules
     try:
         import sys
         from pathlib import Path
-
-        # Add the skill tools path
         skill_tools = Path(__file__).parent.parent / ".claude" / "skills" / "bugcrowd" / "tools"
         if str(skill_tools) not in sys.path:
             sys.path.insert(0, str(skill_tools))
-
         from bugcrowd_scraper import BugcrowdScraper
-
-        # Try authenticated access first for more details
-        scraper = BugcrowdScraper(headless=True, authenticated=authenticated)
+        scraper = BugcrowdScraper(headless=True, authenticated=True)
         program = scraper.get_program_detail(program_code)
-        return program
+        if program and not program.get("manual_entry_required"):
+            print(f"[platforms] Got program details for {program_code} via scraper")
+            return program
+    except (ImportError, Exception) as e:
+        print(f"[platforms] Scraper fallback failed for {program_code}: {e}")
 
-    except ImportError:
-        print("[platforms] Bugcrowd scraper not available")
-        return None
-    except Exception as e:
-        print(f"[platforms] Scraping error for {program_code}: {e}")
-        return None
+    print(f"[platforms] Creating manual template for {program_code}")
+    return _create_manual_program_template(program_code)
 
 
 def _create_manual_program_template(program_code: str) -> dict:

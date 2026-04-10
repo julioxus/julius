@@ -240,7 +240,7 @@ Before ANY external communication (emails, reports, submissions):
 
 ```python
 # REQUIRED AT TOP OF ALL SKILLS:
-from VALIDATION_CHECKLIST import MandatoryValidator
+from tools.validation_gates import MandatoryValidator
 
 # REQUIRED BEFORE ANY FINDING SUBMISSION:
 try:
@@ -266,7 +266,7 @@ except ValidationError as e:
 
 ```python
 # MANDATORY: Use standardized output paths
-from VALIDATION_CHECKLIST import get_engagement_output_path, validate_output_path
+from tools.validation_gates import get_output_path, validate_output_path
 
 def write_evidence_file(engagement_name: str, finding_id: str, filename: str, content: str):
     evidence_path = get_engagement_output_path(engagement_name, "evidence", filename, finding_id)
