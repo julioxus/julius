@@ -522,9 +522,62 @@ outputs/defectdojo-{engagement}/
 - Engagement "SLIDES - Presentation Maker 3.1" → `outputs/defectdojo-slides-pmaker-3.1/`
 - Engagement "SRE Magnific Audit" → `outputs/defectdojo-sre-magnific/`
 
+## 🔒 MANDATORY VALIDATION REQUIREMENTS
+
+Before ANY external communication (emails, reports, submissions):
+
+```python
+# REQUIRED AT TOP OF ALL SKILLS:
+from VALIDATION_CHECKLIST import MandatoryValidator
+
+# REQUIRED BEFORE ANY FINDING SUBMISSION:
+try:
+    MandatoryValidator.validate_finding_before_report(finding_data, engagement_name)
+    print("✅ All validation gates passed")
+except ValidationError as e:
+    print(f"❌ VALIDATION FAILED: {e}")
+    print("🚫 SUBMISSION BLOCKED - Fix issues before proceeding")
+    return False
+```
+
+**Output Structure Compliance:**
+- Evidence files → `outputs/{engagement}/reports/appendix/{finding-id}/`  
+- PoC files → `outputs/{engagement}/processed/findings/{finding-id}/`
+- Data files → `outputs/{engagement}/data/{type}/`
+- Logs → `outputs/{engagement}/logs/`
+
+**Emergency Halt Conditions:**
+- All endpoints return identical responses
+- OAuth without external redirects  
+- Claims without end-to-end proof
+- "Could lead to" without demonstration
+
+```python
+# MANDATORY: Use standardized output paths
+from VALIDATION_CHECKLIST import get_engagement_output_path, validate_output_path
+
+def write_evidence_file(engagement_name: str, finding_id: str, filename: str, content: str):
+    evidence_path = get_engagement_output_path(engagement_name, "evidence", filename, finding_id)
+    validate_output_path(evidence_path, engagement_name)
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(evidence_path), exist_ok=True)
+    with open(evidence_path, 'w') as f:
+        f.write(content)
+
+def write_finding_file(engagement_name: str, finding_id: str, filename: str, content: str):
+    finding_path = get_engagement_output_path(engagement_name, "finding", filename, finding_id)
+    validate_output_path(finding_path, engagement_name)
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(finding_path), exist_ok=True)
+    with open(finding_path, 'w') as f:
+        f.write(content)
+```
+
 ## Critical Rules
 
 **MUST DO**:
+- **ALWAYS run MandatoryValidator.validate_finding_before_report() before ANY external communication**
+- **Use standardized output paths via get_engagement_output_path() function**
 - **ALWAYS write local reports first (Phase 1)** — NEVER call the DefectDojo API to create findings without having local report.md files written and validated by the user
 - **Validate DEFECTDOJO_URL + DEFECTDOJO_TOKEN before any operation**
 - **ASK USER APPROVAL BEFORE UPLOADING** — present summary table, tell user where reports are on disk, get explicit confirmation before Phase 2
@@ -537,6 +590,8 @@ outputs/defectdojo-{engagement}/
 - Verify import completeness
 
 **NEVER**:
+- **Skip mandatory validation gates before any DefectDojo upload**
+- **Use hardcoded paths like "OUTPUT_DIR/", "output/", or "tmp/" - always use get_engagement_output_path()**
 - **Skip Phase 1 (local reports)** — even if findings come from another tool or previous engagement, they MUST exist as local report.md files before upload
 - **Proceed without validated API credentials**
 - **Create or modify ANY resource in DefectDojo without explicit user approval first**

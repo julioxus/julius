@@ -299,6 +299,44 @@ findings/finding-NNN/
     dom-xss-confirmed.png
 ```
 
+## 🔒 MANDATORY VALIDATION REQUIREMENTS
+
+**ALL DOM XSS findings MUST comply with project-wide validation gates**:
+
+### Output Path Compliance (MANDATORY)
+```bash
+# Use standardized output paths - NEVER hardcode paths
+from VALIDATION_CHECKLIST import get_engagement_output_path, validate_output_path
+
+evidence_path = get_engagement_output_path(engagement_name, "evidence", "dom-xss-confirmed.png", finding_id)
+validate_output_path(evidence_path, engagement_name)
+```
+
+**Path Structure:**
+- Evidence files → `outputs/{engagement}/reports/appendix/{finding-id}/`  
+- PoC files → `outputs/{engagement}/processed/findings/{finding-id}/`
+- Activity logs → `outputs/{engagement}/logs/`
+
+### Visual Evidence Requirements (CRITICAL)
+- **MANDATORY**: Playwright screenshots showing XSS execution (alert popup, DOM manipulation)
+- **NEVER**: Simulated terminal output or reconstructed browser responses
+- **MUST capture**: Both the taint flow detection AND the actual XSS execution
+
+### Behavior Validation 
+- Test with valid vs invalid payloads to confirm behavioral differences
+- Verify that XSS fires on functional application, not placeholder
+- Document the complete source → sink taint flow with evidence
+
+### End-to-End Impact Proof
+- Demonstrate actual XSS execution with screenshot proof
+- Show the tainted data flow from source to dangerous sink
+- Include real DOM manipulation evidence, not theoretical
+
+**Emergency Halt Conditions:**
+- Target returns identical responses to all payloads (placeholder server)
+- XSS "fires" on all inputs without source validation
+- Claims without screenshot proof of execution
+
 ## Important Notes
 
 - **Always reinstall hooks after page navigation** (page reloads clear JavaScript state)

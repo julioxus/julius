@@ -234,9 +234,62 @@ Local (ephemeral):
 
 See `reference/PLATFORM_GUIDE.md` for full comparison.
 
+## 🔒 MANDATORY VALIDATION REQUIREMENTS
+
+Before ANY external communication (emails, reports, submissions):
+
+```python
+# REQUIRED AT TOP OF ALL SKILLS:
+from VALIDATION_CHECKLIST import MandatoryValidator
+
+# REQUIRED BEFORE ANY FINDING SUBMISSION:
+try:
+    MandatoryValidator.validate_finding_before_report(finding_data, engagement_name)
+    print("✅ All validation gates passed")
+except ValidationError as e:
+    print(f"❌ VALIDATION FAILED: {e}")
+    print("🚫 SUBMISSION BLOCKED - Fix issues before proceeding")
+    return False
+```
+
+**Output Structure Compliance:**
+- Evidence files → `outputs/{engagement}/reports/appendix/{finding-id}/`  
+- PoC files → `outputs/{engagement}/processed/findings/{finding-id}/`
+- Data files → `outputs/{engagement}/data/{type}/`
+- Logs → `outputs/{engagement}/logs/`
+
+**Emergency Halt Conditions:**
+- All endpoints return identical responses
+- OAuth without external redirects  
+- Claims without end-to-end proof
+- "Could lead to" without demonstration
+
+```python
+# MANDATORY: Use standardized output paths
+from VALIDATION_CHECKLIST import get_engagement_output_path, validate_output_path
+
+def write_evidence_file(engagement_name: str, finding_id: str, filename: str, content: str):
+    evidence_path = get_engagement_output_path(engagement_name, "evidence", filename, finding_id)
+    validate_output_path(evidence_path, engagement_name)
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(evidence_path), exist_ok=True)
+    with open(evidence_path, 'w') as f:
+        f.write(content)
+
+def write_finding_file(engagement_name: str, finding_id: str, filename: str, content: str):
+    finding_path = get_engagement_output_path(engagement_name, "finding", filename, finding_id)
+    validate_output_path(finding_path, engagement_name)
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(finding_path), exist_ok=True)
+    with open(finding_path, 'w') as f:
+        f.write(content)
+```
+
 ## Critical Rules
 
 **MUST DO**:
+- **ALWAYS run MandatoryValidator.validate_finding_before_report() before ANY external communication**
+- **Use standardized output paths via get_engagement_output_path() function**
 - When a program URL is provided, use the Researcher API with `$INTIGRITI_PAT` to fetch scope (preferred over scraping)
 - If `$INTIGRITI_PAT` is not set, ask the user for it or fall back to PDF/scraping/manual input
 - Apply `testingRequirements` from the API (User-Agent, custom headers) to all testing agents
@@ -248,6 +301,8 @@ See `reference/PLATFORM_GUIDE.md` for full comparison.
 - **Invoke /bounty-validation skill BEFORE declaring any report ready for submission** — ad-hoc validation is NOT a substitute
 
 **NEVER**:
+- Report without running MandatoryValidator first
+- Use hardcoded paths like "OUTPUT_DIR/", "output/", or "tmp/"
 - Report without validated PoC
 - Test out-of-scope assets or cause service disruption
 - Include real user data
