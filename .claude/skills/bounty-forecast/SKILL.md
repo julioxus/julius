@@ -39,21 +39,47 @@ Two auth mechanisms, each used for different data:
 
 ### Step 1: Sync platform data + refresh program statuses
 
-**MANDATORY before any forecast.** Sync both platforms and refresh derived data:
+**MANDATORY before any forecast.** Sync both platforms with automatic cookie refresh and refresh derived data:
 
-1. `bounty_sync(source="all")` — delta sync both platforms
-2. Check the result:
+1. **Initial sync attempt**: `bounty_sync(source="all")` — delta sync both platforms
+2. **Auto-fix Intigriti cookie issues**:
    - HackerOne: should show `upserted: N` (automatic via API token)
-   - Intigriti: if `error: no_cookie`, warn user and proceed with H1 data only or ask for cookie
-3. Refresh program statuses (derives open/active/paused/closed from submissions + platform state):
-```bash
-source .env && curl -s -X POST "$BOUNTY_INTEL_API_URL/api/v1/admin/refresh-program-statuses" -H "X-API-Key: $BOUNTY_INTEL_API_KEY"
+   - Intigriti: if `error: no_cookie`, **AUTOMATICALLY execute**:
+     ```bash
+     # Step 2a: Generate fresh cookie via Playwright
+     cd .claude/skills/intigriti/tools && python intigriti_auth.py
+     
+     # Step 2b: Push cookie to server and retry sync
+     PYTHONPATH=/Users/jmartinez/repos/julius python -c "
+     from bounty_intel.sync.intigriti import _push_cookie_to_server
+     from pathlib import Path
+     cookie = (Path.home() / '.intigriti' / 'session_cookie.txt').read_text().strip()
+     _push_cookie_to_server(cookie)
+     print('Cookie pushed to server')
+     "
+     
+     # Step 2c: Retry Intigriti sync with fresh cookie
+     # Should now succeed with fetched/upserted numbers
+     ```
+   - **DO NOT proceed until Intigriti sync succeeds** (no `error: no_cookie`)
+3. **Verify complete data**: Both platforms must show successful sync before continuing
+4. Refresh program statuses via API client:
+```python
+from bounty_intel.client import BountyIntelClient
+import requests
+client = BountyIntelClient()
+resp = requests.post(f"{client.api_url}/api/v1/admin/refresh-program-statuses", 
+                    headers={"X-API-Key": client.api_key}, timeout=30)
 ```
 
 This ensures:
+- **Complete data from both platforms** — never proceed with partial data
+- **Fresh Intigriti cookies** obtained automatically when needed via Playwright browser
+- **Cookie pushed to Cloud Run server** so API-based syncs work
 - Submissions, payouts, and report statuses are up to date
 - Program statuses reflect current platform state (open/active/paused/closed)
-- Auto-created reports are linked and backfilled from platform data
+
+**Note**: If Intigriti login fails or user cancels browser, stop the forecast process and report incomplete data warning.
 
 ### Step 2: AI Triager Evaluation (done by Claude Code inline)
 
