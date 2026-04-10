@@ -47,7 +47,7 @@ import os
 os.environ.setdefault("AUTHLIB_INSECURE_TRANSPORT", "0")  # ensure secure
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-templates.env.globals["platform_badge"] = lambda p: {"hackerone": "badge-blue", "intigriti": "badge-purple", "custom": "badge-orange"}.get(p, "badge-gray")
+templates.env.globals["platform_badge"] = lambda p: {"hackerone": "badge-blue", "intigriti": "badge-purple", "bugcrowd": "badge-red", "custom": "badge-orange"}.get(p, "badge-gray")
 
 
 def _render(request: Request, template: str, context: dict) -> HTMLResponse:
@@ -70,6 +70,8 @@ def _platform_url(platform: str, platform_id: str) -> str:
         return f"https://hackerone.com/reports/{platform_id}"
     if platform == "intigriti":
         return f"https://app.intigriti.com/researcher/submissions/{platform_id}"
+    if platform == "bugcrowd":
+        return f"https://bugcrowd.com/submissions/{platform_id}"
     return ""
 
 
@@ -84,6 +86,8 @@ def _program_platform_url(platform: str, handle: str) -> str:
         if "/" in handle:
             return f"https://app.intigriti.com/researcher/programs/{handle}/detail"
         return f"https://app.intigriti.com/researcher/programs/{handle}/{handle}/detail"
+    if platform == "bugcrowd":
+        return f"https://bugcrowd.com/{handle}"
     return ""
 
 
@@ -115,7 +119,7 @@ def _company_logo_url(program) -> str:
 
 
 def _platform_badge(platform: str) -> str:
-    return {"hackerone": "badge-blue", "intigriti": "badge-purple", "custom": "badge-orange"}.get(platform, "badge-gray")
+    return {"hackerone": "badge-blue", "intigriti": "badge-purple", "bugcrowd": "badge-red", "custom": "badge-orange"}.get(platform, "badge-gray")
 
 
 def _badge_class(disposition: str) -> str:
@@ -1073,13 +1077,16 @@ async def settings_page(request: Request):
 
     h1_state = service.get_sync_state("hackerone")
     inti_state = service.get_sync_state("intigriti")
+    bugcrowd_state = service.get_sync_state("bugcrowd")
 
     return _render(request, "settings.html", {
         "active_page": "settings",
         "stats": stats,
         "h1_sync": h1_state,
         "inti_sync": inti_state,
+        "bugcrowd_sync": bugcrowd_state,
         "h1_configured": bool(settings.hackerone_username and settings.hackerone_api_token),
+        "bugcrowd_configured": bool(settings.bugcrowd_email and settings.bugcrowd_token),
         "days_ago": _days_ago,
     })
 
@@ -1132,6 +1139,26 @@ async def trigger_intigriti_sync(request: Request):
     )
 
 
+@app.post("/sync/bugcrowd")
+async def trigger_bugcrowd_sync(request: Request):
+    """Sync Bugcrowd using browser session or API credentials."""
+    from bounty_intel.sync.delta import sync_all
+
+    results = sync_all(sources=["bugcrowd"])
+    bugcrowd_result = results.get("bugcrowd", {})
+    upserted = bugcrowd_result.get("upserted", 0)
+
+    # Update watermark
+    if bugcrowd_result.get("max_updated"):
+        from bounty_intel import service
+        service.update_sync_state("bugcrowd", bugcrowd_result["max_updated"])
+
+    return HTMLResponse(
+        content=f"<span class='badge badge-green'>Bugcrowd: {upserted} synced</span>",
+        headers={"HX-Trigger": "reload-all"},
+    )
+
+
 # ──────────────────────────────────────────────────────────────
 # Evidence signed URL redirect
 # ──────────────────────────────────────────────────────────────
@@ -1170,3 +1197,49 @@ async def evidence_redirect(evidence_id: int):
             return FileResponse(p, media_type=content_type, filename=filename)
 
     return HTMLResponse("Evidence file not available", status_code=404)
+
+
+# ──────────────────────────────────────────────────────────────
+# Bugcrowd API endpoints
+# ──────────────────────────────────────────────────────────────
+
+@app.get("/api/programs/bugcrowd")
+async def list_bugcrowd_programs():
+    """List all Bugcrowd programs."""
+    from bounty_intel import service
+
+    programs = service.list_programs(platform="bugcrowd")
+    return {"programs": programs, "count": len(programs)}
+
+
+@app.get("/api/programs/bugcrowd/{program_id}")
+async def get_bugcrowd_program(program_id: int):
+    """Get specific Bugcrowd program details."""
+    from bounty_intel import service
+
+    program = service.get_program(program_id)
+    if not program or program.platform != "bugcrowd":
+        return {"error": "Bugcrowd program not found"}, 404
+
+    return {"program": program}
+
+
+@app.post("/api/programs/bugcrowd/discover")
+async def discover_bugcrowd_programs():
+    """Trigger comprehensive Bugcrowd program discovery."""
+    from bounty_intel.sync.delta import sync_all
+
+    results = sync_all(sources=["bugcrowd"])
+    bugcrowd_result = results.get("bugcrowd", {})
+
+    # Update watermark
+    if bugcrowd_result.get("max_updated"):
+        from bounty_intel import service
+        service.update_sync_state("bugcrowd", bugcrowd_result["max_updated"])
+
+    return {
+        "status": "completed",
+        "upserted": bugcrowd_result.get("upserted", 0),
+        "errors": bugcrowd_result.get("errors", []),
+        "programs_found": bugcrowd_result.get("programs_found", 0)
+    }

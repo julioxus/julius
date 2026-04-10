@@ -4,7 +4,7 @@
 <div class="page-header"><h1>Settings</h1></div>
 
 <h2>Sync</h2>
-<div class="grid" style="grid-template-columns: 1fr 1fr">
+<div class="grid" style="grid-template-columns: 1fr 1fr 1fr">
   <!-- HackerOne sync -->
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem">
@@ -40,6 +40,24 @@
     </div>
     <div id="inti-sync-result" style="margin-top:0.5rem"></div>
   </div>
+
+  <!-- Bugcrowd sync -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem">
+      <div>
+        <strong style="font-size:1.1rem">Bugcrowd</strong>
+        {% if bugcrowd_configured %}<span class="badge badge-green" style="margin-left:0.4rem">API configured</span>{% else %}<span class="badge badge-yellow" style="margin-left:0.4rem">Session mode</span>{% endif %}
+      </div>
+      <button class="btn btn-primary" onclick="document.getElementById('bugcrowd-modal').style.display='flex'">
+        Sync Now
+      </button>
+    </div>
+    <div class="muted" style="font-size:0.85rem">
+      Uses browser session or API token. Session auto-refreshes if needed.
+      {% if bugcrowd_sync %}<br>Last sync: {{ bugcrowd_sync.last_sync_at.strftime('%Y-%m-%d %H:%M UTC') if bugcrowd_sync.last_sync_at else 'Never' }}{% endif %}
+    </div>
+    <div id="bugcrowd-sync-result" style="margin-top:0.5rem"></div>
+  </div>
 </div>
 
 <!-- Intigriti Cookie Modal -->
@@ -63,6 +81,26 @@
         </button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Bugcrowd Session Modal -->
+<div id="bugcrowd-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center">
+  <div class="card" style="width:520px;max-width:90vw">
+    <h3 style="margin-bottom:1rem">Sync Bugcrowd</h3>
+    <div class="muted" style="font-size:0.85rem;margin-bottom:1rem;line-height:1.6">
+      <strong>Bugcrowd supports two authentication modes:</strong><br>
+      <strong>1. API Token</strong> (enterprise customers): Set BUGCROWD_EMAIL and BUGCROWD_TOKEN in .env<br>
+      <strong>2. Browser Session</strong> (all users): Automatic session detection from your browser<br><br>
+      The sync will automatically detect which mode to use and authenticate accordingly.
+    </div>
+    <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+      <button type="button" class="btn" onclick="document.getElementById('bugcrowd-modal').style.display='none'">Cancel</button>
+      <button class="btn btn-primary" hx-post="/sync/bugcrowd" hx-target="#bugcrowd-sync-result" hx-swap="innerHTML"
+              hx-on::after-request="document.getElementById('bugcrowd-modal').style.display='none'">
+        Sync Now <span class="htmx-indicator"><span class="spinner"></span></span>
+      </button>
+    </div>
   </div>
 </div>
 

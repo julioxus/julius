@@ -20,6 +20,7 @@
       <option value="">All Platforms</option>
       <option value="hackerone" {% if filter_platform == 'hackerone' %}selected{% endif %}>HackerOne</option>
       <option value="intigriti" {% if filter_platform == 'intigriti' %}selected{% endif %}>Intigriti</option>
+      <option value="bugcrowd" {% if filter_platform == 'bugcrowd' %}selected{% endif %}>Bugcrowd</option>
       <option value="custom" {% if filter_platform == 'custom' %}selected{% endif %}>Custom</option>
     </select>
     <select name="status" class="filter-select">
