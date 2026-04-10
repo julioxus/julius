@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from bounty_intel import service
-from bounty_intel.sync import hackerone, intigriti
+from bounty_intel.sync import hackerone, intigriti, bugcrowd
 
 
 def sync_all(sources: list[str] | None = None, force: bool = False) -> dict:
@@ -14,7 +14,7 @@ def sync_all(sources: list[str] | None = None, force: bool = False) -> dict:
     Returns per-source stats dict.
     """
     if sources is None:
-        sources = ["hackerone", "intigriti"]
+        sources = ["hackerone", "intigriti", "bugcrowd"]
 
     results = {}
 
@@ -36,6 +36,10 @@ def sync_all(sources: list[str] | None = None, force: bool = False) -> dict:
             stats = hackerone.sync(since=since)
         elif source == "intigriti":
             stats = intigriti.sync(since=since)
+        elif source == "bugcrowd":
+            # Bugcrowd sync expects max_updated as ISO string, not datetime
+            max_updated_str = since.isoformat() if since else ""
+            stats = bugcrowd.sync_bugcrowd_submissions(max_updated=max_updated_str)
         else:
             print(f"  [!] Unknown source: {source}")
             continue

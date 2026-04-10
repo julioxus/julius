@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     hackerone_api_token: str = ""
     intigriti_cookie: str = ""
     intigriti_pat: str = ""
+    bugcrowd_email: str = ""
+    bugcrowd_token: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
