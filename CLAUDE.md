@@ -4,14 +4,14 @@ This repo provides Claude Code skills and agents for security testing, bug bount
 
 ## Architecture
 
-Hybrid: **AGENTS.md** (passive, always loaded — payloads, methodologies, chain tables) + **Skills** (user-triggered workflows — `/pentest`, `/hackerone`, etc.) + **Bounty Intel DB** (PostgreSQL source of truth — programs, findings, evidence, submissions).
+Hybrid: **AGENTS.md** (passive, always loaded — payloads, methodologies, chain tables) + **Skills** (user-triggered workflows — `/pentest`, `/hackerone`, `/intigriti`, `/bugcrowd`, etc.) + **Bounty Intel DB** (PostgreSQL source of truth — programs, findings, evidence, submissions).
 
 ## Repository Structure
 
 Key directories (explore with `glob`/`ls` for full detail):
 - `AGENTS.md` — Passive security knowledge (payloads, chains, methodologies)
 - `bounty_intel/` — DB-backed ops center: `db.py` (models), `service.py` (CRUD), `client.py` (HTTP client), `web/` (FastAPI dashboard), `sync/`, `forecast/`
-- `.claude/skills/` — Orchestrators: `pentest/`, `hackerone/`, `intigriti/`, `defectdojo/`, `vendor-security-assessment/` | Categories: `offensive/`, `recon/`, `detection/`, `bounty/`, `infrastructure/`, `tools/`, `reporting/`
+- `.claude/skills/` — Orchestrators: `pentest/`, `hackerone/`, `intigriti/`, `bugcrowd/`, `defectdojo/`, `vendor-security-assessment/` | Categories: `offensive/`, `recon/`, `detection/`, `bounty/`, `infrastructure/`, `tools/`, `reporting/`
 - `.claude/agents/` — Specialized agents: orchestrator, executor, validator, DOM XSS, script-gen
 - `tools/` — `scope_checker.py`, `safety_rails.py`, installers
 
@@ -19,7 +19,7 @@ Key directories (explore with `glob`/`ls` for full detail):
 
 **CRITICAL**: Always query `bounty_*` MCP tools first for any engagement context. This is the single source of truth — never rely on memory or local files.
 
-**Access**: `bounty_*` MCP tools (auto-loaded via `.mcp.json`). Pattern: `bounty_{list|get|save|search|update|upload}_{programs|findings|evidence|submissions|payouts|reports|recon|attack_surface}`. Also: `bounty_suggest_attacks()`, `bounty_forecast()`, `bounty_get_stats()`.
+**Access**: `bounty_*` MCP tools (auto-loaded via `.mcp.json`). Pattern: `bounty_{list|get|save|search|update|upload}_{programs|findings|evidence|submissions|payouts|reports|recon|attack_surface}`. Platform-specific: `bounty_search_{hackerone|intigriti|bugcrowd}_programs()`. Also: `bounty_suggest_attacks()`, `bounty_forecast()`, `bounty_get_stats()`.
 
 **Fallback**: `from bounty_intel.client import BountyIntelClient`
 

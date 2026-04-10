@@ -658,7 +658,7 @@ def bounty_save_ai_evaluation(
 def bounty_sync(source: str = "all") -> dict:
     """Sync submissions from bug bounty platforms.
 
-    Source can be 'all', 'hackerone', or 'intigriti'. Performs delta sync
+    Source can be 'all', 'hackerone', 'intigriti', or 'bugcrowd'. Performs delta sync
     to pull new/updated submissions from the platform APIs.
     """
     c = _get_client()
@@ -718,6 +718,43 @@ def bounty_refresh_intigriti_session() -> dict:
         return {"error": str(e)}
 
 
+@mcp.tool()
+def bounty_refresh_bugcrowd_session() -> dict:
+    """Refresh Bugcrowd session cookies via Playwright browser login.
+
+    Launches a browser window for the user to log in to Bugcrowd.
+    After login, the session is automatically:
+    1. Cached locally (~/.bugcrowd/)
+    2. Available for private program access
+    3. Used for authenticated scraping
+
+    Use this when you need access to private/invite-only Bugcrowd programs.
+    """
+    from bounty_intel.bugcrowd_session import refresh_bugcrowd_session
+    return refresh_bugcrowd_session()
+
+
+@mcp.tool()
+def bounty_get_bugcrowd_session_status() -> dict:
+    """Check Bugcrowd session status and validity.
+
+    Returns information about cached session cookies and whether they're still valid.
+    Use to determine if login refresh is needed.
+    """
+    from bounty_intel.bugcrowd_session import get_bugcrowd_session_status
+    return get_bugcrowd_session_status()
+
+
+@mcp.tool()
+def bounty_clear_bugcrowd_session() -> dict:
+    """Clear cached Bugcrowd session.
+
+    Use when you want to force a fresh login or clear stored credentials.
+    """
+    from bounty_intel.bugcrowd_session import clear_bugcrowd_session
+    return clear_bugcrowd_session()
+
+
 # ── Platform Discovery (4) ─────────────────────────────────
 
 
@@ -760,6 +797,36 @@ def bounty_get_hackerone_program_scope(handle: str) -> list[dict]:
     """
     from bounty_intel.platforms import get_hackerone_program_scope
     return get_hackerone_program_scope(handle)
+
+
+@mcp.tool()
+def bounty_search_bugcrowd_programs(status: str = "", limit: int = 50) -> list[dict]:
+    """Search Bugcrowd programs via API.
+
+    Returns programs with name, status, bounty info. Uses Bugcrowd API token.
+    """
+    from bounty_intel.platforms import search_bugcrowd_programs
+    return search_bugcrowd_programs(status=status, limit=limit)
+
+
+@mcp.tool()
+def bounty_get_bugcrowd_program_detail(program_code: str) -> dict:
+    """Get full Bugcrowd program detail including scope and rules.
+
+    program_code is the Bugcrowd program code/handle. Returns scope targets with priorities.
+    """
+    from bounty_intel.platforms import get_bugcrowd_program_detail
+    return get_bugcrowd_program_detail(program_code) or {"error": "not found or credentials not configured"}
+
+
+@mcp.tool()
+def bounty_get_bugcrowd_program_scope(program_code: str) -> list[dict]:
+    """Get Bugcrowd program scope (targets).
+
+    Returns list of in-scope targets with type, name, priority, and bounty eligibility.
+    """
+    from bounty_intel.platforms import get_bugcrowd_program_scope
+    return get_bugcrowd_program_scope(program_code)
 
 
 # ── Entry point ──────────────────────────────────────────────
