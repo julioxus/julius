@@ -78,7 +78,7 @@
     </div>
     <form method="post" action="/reports/{{ report.id }}/submit">
       <input type="text" name="platform_submission_id"
-        placeholder="{% if report.platform == 'hackerone' %}e.g. 3651585{% else %}e.g. ABCD-1234-EFGH{% endif %}"
+        placeholder="{% if report.platform == 'hackerone' %}e.g. 3651585{% elif report.platform == 'bugcrowd' %}e.g. 12345678{% else %}e.g. ABCD-1234-EFGH{% endif %}"
         style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:0.7rem 1rem;font-size:0.95rem;font-family:monospace;margin-bottom:1rem"
         required autofocus>
       <div style="display:flex;gap:0.5rem;justify-content:flex-end">
@@ -97,6 +97,8 @@
       After submitting the report on
       {% if report.platform == 'hackerone' %}
       <a href="https://hackerone.com" target="_blank" style="color:var(--accent)">HackerOne</a>,
+      {% elif report.platform == 'bugcrowd' %}
+      <a href="https://bugcrowd.com" target="_blank" style="color:var(--accent)">Bugcrowd</a>,
       {% else %}
       <a href="https://app.intigriti.com" target="_blank" style="color:var(--accent)">Intigriti</a>,
       {% endif %}
@@ -104,7 +106,7 @@
     </div>
     <form method="post" action="/reports/{{ report.id }}/submit">
       <input type="text" name="platform_submission_id"
-        placeholder="{% if report.platform == 'hackerone' %}e.g. 3651585{% else %}e.g. abc123-def456{% endif %}"
+        placeholder="{% if report.platform == 'hackerone' %}e.g. 3651585{% elif report.platform == 'bugcrowd' %}e.g. 12345678{% else %}e.g. abc123-def456{% endif %}"
         style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:0.7rem 1rem;font-size:0.95rem;font-family:monospace;margin-bottom:1rem"
         required autofocus>
       <div style="display:flex;gap:0.5rem;justify-content:flex-end">
