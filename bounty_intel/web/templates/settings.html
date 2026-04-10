@@ -30,12 +30,12 @@
         <strong style="font-size:1.1rem">Intigriti</strong>
         <span class="badge badge-yellow" style="margin-left:0.4rem">Cookie required</span>
       </div>
-      <button class="btn btn-primary" onclick="document.getElementById('inti-modal').style.display='flex'">
-        Sync Now
+      <button class="btn btn-primary" hx-post="/sync/intigriti" hx-swap="innerHTML" hx-target="#inti-sync-result" hx-indicator="#inti-spinner">
+        Sync Now <span id="inti-spinner" class="htmx-indicator"><span class="spinner"></span></span>
       </button>
     </div>
     <div class="muted" style="font-size:0.85rem">
-      Requires session cookie (expires ~1h). Paste from browser DevTools.
+      Automatic browser session detection. Manual cookie fallback available via modal.
       {% if inti_sync %}<br>Last sync: {{ inti_sync.last_sync_at.strftime('%Y-%m-%d %H:%M UTC') if inti_sync.last_sync_at else 'Never' }}{% endif %}
     </div>
     <div id="inti-sync-result" style="margin-top:0.5rem"></div>

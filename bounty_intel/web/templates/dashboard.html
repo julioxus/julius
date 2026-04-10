@@ -27,7 +27,10 @@
     <button class="btn btn-primary" hx-post="/sync" hx-swap="innerHTML" hx-target="#sync-status" hx-indicator="#sync-spinner">
       Sync H1 <span id="sync-spinner" class="htmx-indicator"><span class="spinner"></span></span>
     </button>
-    <button class="btn" onclick="document.getElementById('inti-modal').style.display='flex'" title="Requires Intigriti session cookie">Sync Intigriti</button>
+    <button class="btn btn-secondary" hx-post="/sync/intigriti" hx-swap="innerHTML" hx-target="#sync-status" hx-indicator="#inti-spinner">
+      Sync Intigriti <span id="inti-spinner" class="htmx-indicator"><span class="spinner"></span></span>
+    </button>
+    <button class="btn btn-outline" onclick="document.getElementById('inti-modal').style.display='flex'" title="Manual cookie fallback">⚙️</button>
     <button class="btn btn-secondary" onclick="document.getElementById('bugcrowd-modal').style.display='flex'" title="Sync Bugcrowd programs">Sync Bugcrowd</button>
     <span id="sync-status"></span>
   </div>
@@ -205,13 +208,13 @@
 <!-- Intigriti Cookie Modal -->
 <div id="inti-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center">
   <div class="card" style="width:520px;max-width:90vw">
-    <h3 style="margin-bottom:1rem">Sync Intigriti</h3>
+    <h3 style="margin-bottom:1rem">Manual Intigriti Sync</h3>
     <div class="muted" style="font-size:0.85rem;margin-bottom:1rem;line-height:1.6">
-      <strong>Option A:</strong> Install the Bounty Intel Chrome extension for one-click sync.<br>
-      <strong>Option B:</strong><br>
-      1. Open <a href="https://app.intigriti.com/researcher/inbox" target="_blank" style="color:var(--accent)">app.intigriti.com</a><br>
-      2. <kbd style="background:var(--bg);padding:1px 6px;border-radius:3px">F12</kbd> &rarr; Application &rarr; Cookies<br>
-      3. Copy <code>__Host-Intigriti.Web.Researcher</code> value
+      <strong>Use this fallback if automatic detection fails.</strong><br><br>
+      <strong>Steps:</strong><br>
+      1. Open <a href="https://app.intigriti.com/researcher/inbox" target="_blank" style="color:var(--accent)">app.intigriti.com</a> (log in if needed)<br>
+      2. Press <kbd style="background:var(--bg);padding:1px 6px;border-radius:3px;font-size:0.8rem">F12</kbd> → <strong>Application</strong> → <strong>Cookies</strong><br>
+      3. Copy <code>__Host-Intigriti.Web.Researcher</code> value and paste below
     </div>
     <form hx-post="/sync/intigriti" hx-target="#sync-status" hx-swap="innerHTML"
           hx-on::after-request="document.getElementById('inti-modal').style.display='none'">

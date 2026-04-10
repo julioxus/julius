@@ -1109,11 +1109,27 @@ async def trigger_sync(request: Request):
 
 @app.post("/sync/intigriti")
 async def trigger_intigriti_sync(request: Request):
-    """Sync Intigriti using a pasted session cookie."""
+    """Sync Intigriti using automatic session detection or manual cookie."""
     form = await request.form()
-    cookie = form.get("cookie", "").strip()
-    if not cookie:
-        return HTMLResponse("<span class='badge badge-red'>No cookie provided</span>")
+    manual_cookie = form.get("cookie", "").strip()
+
+    # Try automatic session detection first
+    if not manual_cookie:
+        try:
+            import sys
+            from pathlib import Path
+            auth_tools = str(Path(__file__).resolve().parents[1] / ".claude" / "skills" / "intigriti" / "tools")
+            if auth_tools not in sys.path:
+                sys.path.insert(0, auth_tools)
+            from intigriti_auth import get_session_cookie
+            cookie = get_session_cookie()
+            if not cookie:
+                return HTMLResponse("<span class='badge badge-red'>Auto-detection failed - no browser session found</span>")
+        except Exception as e:
+            return HTMLResponse(f"<span class='badge badge-red'>Auto-detection failed: {str(e)}</span>")
+    else:
+        # Use manual cookie if provided
+        cookie = manual_cookie
 
     # Validate cookie works
     from bounty_intel.sync.intigriti import _validate_cookie, sync as inti_sync
