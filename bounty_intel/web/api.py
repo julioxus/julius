@@ -6,7 +6,7 @@ Skills running locally use these instead of direct DB access.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 
 from bounty_intel.config import settings
@@ -89,6 +89,7 @@ class ReportUpdate(BaseModel):
     markdown_body: str | None = None
     status: str | None = None
     validation_result: dict | None = None
+    platform_submission_id: str | None = None
 
 class HuntIn(BaseModel):
     target: str
@@ -353,9 +354,10 @@ async def delete_report(report_id: int):
 
 
 @router.post("/reports/{report_id}/submit", dependencies=[Depends(verify_api_key)])
-async def api_submit_report(report_id: int, platform_submission_id: str = ""):
+async def api_submit_report(report_id: int, payload: dict = Body(default={})):
     from bounty_intel import service
-    
+
+    platform_submission_id = (payload.get("platform_submission_id") or "").strip()
     service.mark_report_submitted(report_id, platform_submission_id)
     return {"ok": True}
 
