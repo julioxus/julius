@@ -510,16 +510,28 @@ def _fallback_bugcrowd_programs() -> list[dict]:
     return known_programs
 
 
+def _get_bugcrowd_detail_via_scraper(program_code: str) -> dict | None:
+    """Use the Bugcrowd scraper (brief.json → Playwright) for full detail+scope."""
+    try:
+        import sys
+        from pathlib import Path
+        skill_tools = Path(__file__).parent.parent / ".claude" / "skills" / "bugcrowd" / "tools"
+        if str(skill_tools) not in sys.path:
+            sys.path.insert(0, str(skill_tools))
+        from bugcrowd_scraper import BugcrowdScraper
+        scraper = BugcrowdScraper(headless=True, authenticated=True)
+        result = scraper.get_program_detail(program_code)
+        if result and not result.get("manual_entry_required"):
+            print(f"[platforms] Got program details for {program_code} via scraper ({result.get('discovery_method', 'unknown')})")
+            return result
+    except (ImportError, Exception) as e:
+        print(f"[platforms] Scraper fallback failed for {program_code}: {e}")
+    return None
+
+
 def get_bugcrowd_program_detail(program_code: str) -> dict | None:
     """Get full Bugcrowd program detail including scope and rules."""
-    # Try engagements.json listing for basic info (fast, no Playwright)
-    programs = _fetch_bugcrowd_engagements_json(limit=300)
-    for p in programs:
-        if p.get("handle") == program_code:
-            print(f"[platforms] Got program info for {program_code} via JSON API")
-            return p
-
-    # Try official API (if credentials configured)
+    # Try official API first (if credentials configured) — returns full detail+scope
     if settings.bugcrowd_email and settings.bugcrowd_token:
         url = f"{_BUGCROWD_BASE}/programs/{program_code}"
         data = _api_get(url, _bugcrowd_headers())
@@ -535,21 +547,19 @@ def get_bugcrowd_program_detail(program_code: str) -> dict | None:
             print(f"[platforms] Got program details for {program_code} via credentials API")
             return program
 
-    # Fallback: scraper with Playwright for scope/rules
-    try:
-        import sys
-        from pathlib import Path
-        skill_tools = Path(__file__).parent.parent / ".claude" / "skills" / "bugcrowd" / "tools"
-        if str(skill_tools) not in sys.path:
-            sys.path.insert(0, str(skill_tools))
-        from bugcrowd_scraper import BugcrowdScraper
-        scraper = BugcrowdScraper(headless=True, authenticated=True)
-        program = scraper.get_program_detail(program_code)
-        if program and not program.get("manual_entry_required"):
-            print(f"[platforms] Got program details for {program_code} via scraper")
-            return program
-    except (ImportError, Exception) as e:
-        print(f"[platforms] Scraper fallback failed for {program_code}: {e}")
+    # Try scraper (brief.json → Playwright) — returns scope, rules, description
+    scraper_result = _get_bugcrowd_detail_via_scraper(program_code)
+    if scraper_result:
+        return scraper_result
+
+    # Last resort: engagements.json for basic info (no scope)
+    programs = _fetch_bugcrowd_engagements_json(limit=300)
+    for p in programs:
+        if p.get("handle") == program_code:
+            print(f"[platforms] Got basic info only for {program_code} via engagements.json (no scope)")
+            p["scope"] = []
+            p["rules"] = ""
+            return p
 
     print(f"[platforms] Creating manual template for {program_code}")
     return _create_manual_program_template(program_code)
@@ -578,18 +588,20 @@ def _create_manual_program_template(program_code: str) -> dict:
 
 def get_bugcrowd_program_scope(program_code: str) -> list[dict]:
     """Get Bugcrowd targets/scope for a program."""
-    if not settings.bugcrowd_email or not settings.bugcrowd_token:
-        print("[platforms] Bugcrowd credentials not configured")
-        return []
+    # Try official API if credentials configured
+    if settings.bugcrowd_email and settings.bugcrowd_token:
+        url = f"{_BUGCROWD_BASE}/programs/{program_code}/targets"
+        data = _api_get(url, _bugcrowd_headers())
+        if data is not None:
+            raw_targets = data.get("targets", [])
+            if isinstance(raw_targets, list) and raw_targets:
+                return [_normalize_bugcrowd_scope(t) for t in raw_targets]
 
-    url = f"{_BUGCROWD_BASE}/programs/{program_code}/targets"
-    data = _api_get(url, _bugcrowd_headers())
-    if data is None:
-        return []
+    # Fallback: scraper (brief.json → Playwright) extracts scope from program page
+    scraper_result = _get_bugcrowd_detail_via_scraper(program_code)
+    if scraper_result and scraper_result.get("scope"):
+        print(f"[platforms] Got scope for {program_code} via scraper")
+        return scraper_result["scope"]
 
-    raw_targets = data.get("targets", [])
-    if not isinstance(raw_targets, list):
-        print(f"[platforms] unexpected Bugcrowd targets response format")
-        return []
-
-    return [_normalize_bugcrowd_scope(t) for t in raw_targets]
+    print(f"[platforms] No scope available for {program_code}")
+    return []

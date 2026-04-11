@@ -235,7 +235,7 @@ class BugcrowdScraper:
         }
 
     def _fetch_detail_playwright(self, handle: str) -> Optional[Dict]:
-        """Fallback: extract program detail via Playwright browser."""
+        """Extract full program detail via Playwright browser (authenticated)."""
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as p:
@@ -259,22 +259,32 @@ class BugcrowdScraper:
                 page.wait_for_load_state("networkidle")
 
                 # Extract title
-                title_el = page.query_selector("h1, .program-title, [data-testid='program-title']")
+                title_el = page.query_selector("h1")
                 name = title_el.inner_text().strip() if title_el else handle
 
-                # Extract scope from page
-                scope = self._extract_scope_from_page(page)
-
-                # Extract bounty table
-                bounties = self._extract_bounties_from_page(page)
-
-                # Extract description
+                # Extract description/tagline from header
                 desc = ""
-                for sel in [".program-brief", ".program-description", "[data-testid='program-description']"]:
-                    el = page.query_selector(sel)
-                    if el:
-                        desc = el.inner_text().strip()
-                        break
+                header = page.query_selector(".researcher-engagement-brief-header")
+                if header:
+                    tagline_el = header.query_selector("p")
+                    if tagline_el:
+                        desc = tagline_el.inner_text().strip()
+
+                # Extract scope + bounties from target groups
+                scope, oos_targets, all_amounts, all_tags = self._extract_target_groups(page)
+
+                # Detect tech from tags collected across all groups
+                tech_stack = list(set(t.lower() for t in all_tags if t))
+                if not tech_stack:
+                    tech_stack = self._detect_tech(desc)
+
+                # Extract out-of-scope notes
+                oos_rules = ""
+                oos_group = page.query_selector(".cc-target-grp .cc-scope-pill:has-text('Out of scope')")
+                if oos_group:
+                    parent = oos_group.evaluate_handle("el => el.closest('.cc-target-grp')")
+                    if parent:
+                        oos_rules = parent.inner_text()[:1000]
 
                 return {
                     "platform": "bugcrowd",
@@ -285,12 +295,14 @@ class BugcrowdScraper:
                     "program_type": "bounty",
                     "confidentiality": "public",
                     "description": desc,
-                    "min_bounty": bounties.get("min_bounty", 0.0),
-                    "max_bounty": bounties.get("max_bounty", 0.0),
+                    "min_bounty": min(all_amounts) if all_amounts else 0.0,
+                    "max_bounty": max(all_amounts) if all_amounts else 0.0,
                     "currency": "USD",
                     "url": url,
                     "scope": scope,
-                    "tech_stack": self._detect_tech(desc),
+                    "oos_targets": oos_targets,
+                    "oos_rules": oos_rules,
+                    "tech_stack": tech_stack,
                     "discovery_method": "playwright",
                 }
             except Exception as e:
@@ -299,43 +311,105 @@ class BugcrowdScraper:
             finally:
                 browser.close()
 
-    def _extract_scope_from_page(self, page) -> List[Dict]:
-        """Extract scope items from a Playwright page."""
-        scope = []
-        for selector in [".scope-table tbody tr", ".in-scope-list li",
-                         "[data-testid='scope-item']", ".target-list .target-item"]:
-            elements = page.query_selector_all(selector)
-            if elements:
-                for el in elements:
-                    text = el.inner_text().strip()
-                    if text and len(text) > 2:
-                        scope.append({
-                            "asset_type": "url",
-                            "endpoint": text,
-                            "tier": "p3",
-                            "eligible_for_bounty": True,
-                        })
-                break
-        return scope
+    def _extract_target_groups(self, page) -> tuple:
+        """Extract all target groups (.cc-target-grp) from program page.
 
-    def _extract_bounties_from_page(self, page) -> Dict:
-        """Extract bounty amounts from a Playwright page."""
-        amounts = []
-        for selector in [".bounty-table tr", ".rewards-table tr", "[data-testid='bounty-row']"]:
-            elements = page.query_selector_all(selector)
-            for el in elements:
-                text = el.inner_text()
-                for m in re.findall(r"\$[\d,]+", text):
-                    try:
-                        amounts.append(float(m.replace("$", "").replace(",", "")))
-                    except ValueError:
-                        pass
-            if amounts:
-                break
-        return {
-            "min_bounty": min(amounts) if amounts else 0.0,
-            "max_bounty": max(amounts) if amounts else 0.0,
+        Returns (in_scope, oos_targets, all_bounty_amounts, all_tags).
+        """
+        in_scope: List[Dict] = []
+        oos_targets: List[str] = []
+        all_amounts: List[float] = []
+        all_tags: List[str] = []
+
+        # Icon class → asset type mapping
+        icon_type_map = {
+            "bc-icon--website": "url",
+            "bc-icon--api": "api",
+            "bc-icon--android": "mobile",
+            "bc-icon--ios": "mobile",
+            "bc-icon--hardware": "hardware",
+            "bc-icon--other": "other",
         }
+
+        groups = page.query_selector_all(".cc-target-grp")
+        for group in groups:
+            # Determine in-scope vs out-of-scope
+            scope_pill = group.query_selector(".cc-scope-pill")
+            scope_status = scope_pill.inner_text().strip().lower() if scope_pill else ""
+            is_oos = "out" in scope_status
+
+            # Group title (e.g. "Gearset Staging", "Clayton Public API")
+            title_el = group.query_selector(".bc-panel__title")
+            group_name = title_el.inner_text().strip() if title_el else ""
+
+            # Extract bounty ranges from reward graph legend
+            if not is_oos:
+                reward_legend = group.query_selector(".cc-reward-graph__legend")
+                if reward_legend:
+                    reward_text = reward_legend.inner_text()
+                    for m in re.findall(r"\$[\d,]+", reward_text):
+                        try:
+                            all_amounts.append(float(m.replace("$", "").replace(",", "")))
+                        except ValueError:
+                            pass
+
+                # Extract group description/notes (everything after the table)
+                group_notes = ""
+                # Get text content excluding table and reward graph
+                note_els = group.query_selector_all("p, li, .bc-markdown")
+                for nel in note_els:
+                    group_notes += nel.inner_text().strip() + "\n"
+                group_notes = group_notes.strip()[:500]
+
+            # Extract assets from table rows
+            rows = group.query_selector_all("table tbody tr")
+            for row in rows:
+                cells = row.query_selector_all("td")
+                if not cells:
+                    continue
+
+                # First cell: target name/URL + icon for asset type
+                name_cell = cells[0]
+                target_text = name_cell.inner_text().strip()
+                # Split into name and URL (first line is name, second is URL)
+                lines = [l.strip() for l in target_text.split("\n") if l.strip()]
+                endpoint = lines[0] if lines else target_text
+                target_url = lines[1] if len(lines) > 1 else ""
+
+                # Detect asset type from icon class
+                asset_type = "url"
+                icon_el = name_cell.query_selector("[class*='bc-icon--']")
+                if icon_el:
+                    icon_cls = icon_el.evaluate("el => el.className")
+                    for cls, atype in icon_type_map.items():
+                        if cls in icon_cls:
+                            asset_type = atype
+                            break
+
+                # Second cell: tags
+                tags = []
+                if len(cells) > 1:
+                    tags_text = cells[1].inner_text().strip()
+                    tags = [t.strip() for t in tags_text.split("\n") if t.strip() and t.strip() != "+"]
+                    # Filter out "+N" overflow indicators
+                    tags = [t for t in tags if not re.match(r"^\+\d+$", t)]
+                    all_tags.extend(tags)
+
+                if is_oos:
+                    oos_targets.append(endpoint)
+                else:
+                    in_scope.append({
+                        "asset_type": asset_type,
+                        "endpoint": endpoint,
+                        "target_url": target_url,
+                        "tier": "p1",  # Default; Bugcrowd shares reward table per group
+                        "eligible_for_bounty": True,
+                        "group": group_name,
+                        "tags": tags,
+                        "description": group_notes if not is_oos else "",
+                    })
+
+        return in_scope, oos_targets, all_amounts, all_tags
 
     # ── Helpers ────────────────────────────────────────────────
 
