@@ -100,3 +100,6 @@ Desktop.ini
 
 # Node
 node_modules/
+
+# Research notes
+bugcrowd_ranking_small_companies.md
