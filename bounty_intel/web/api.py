@@ -594,23 +594,37 @@ class EvidenceIn(BaseModel):
 
 @router.post("/findings/{finding_id}/evidence/upload", dependencies=[Depends(verify_api_key)])
 async def upload_evidence(finding_id: int, data: EvidenceIn):
+    import logging
     from bounty_intel import service
 
     gcs_path = ""
+    gcs_error = ""
+    size_bytes = data.size_bytes
+
     if data.local_path:
         from pathlib import Path
         local = Path(data.local_path)
-        if local.exists():
+        if not local.exists():
+            raise HTTPException(400, f"local_path does not exist: {data.local_path}")
+        if not size_bytes:
+            size_bytes = local.stat().st_size
+        try:
             from bounty_intel.evidence.uploader import upload_to_gcs
             gcs_path = upload_to_gcs(local, f"findings/{finding_id}")
+        except Exception as exc:
+            logging.error("GCS upload failed for %s: %s", local, exc)
+            gcs_error = str(exc)
 
     eid = service.save_evidence_file(
         finding_id=finding_id, report_id=data.report_id,
         filename=data.filename, local_path=data.local_path,
         gcs_path=gcs_path, content_type=data.content_type,
-        size_bytes=data.size_bytes,
+        size_bytes=size_bytes,
     )
-    return {"id": eid, "gcs_path": gcs_path}
+    result = {"id": eid, "gcs_path": gcs_path}
+    if gcs_error:
+        result["gcs_error"] = gcs_error
+    return result
 
 
 # ── Evidence Signed URL ─────────────────────────────────────

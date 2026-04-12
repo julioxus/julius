@@ -97,3 +97,6 @@ Desktop.ini
 *.backup
 
 **/.playwright-mcp
+
+# Node
+node_modules/
