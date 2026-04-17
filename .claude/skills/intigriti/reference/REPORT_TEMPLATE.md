@@ -93,3 +93,4 @@ Screenshots go **inline within Steps to Reproduce**, immediately after the step 
 - Clear output indicating success/failure
 - Timestamp in output
 - Preferred formats: curl command > Python script > raw HTTP > HTML file
+- **Every command must have been executed and verified working before inclusion** — never write commands from memory

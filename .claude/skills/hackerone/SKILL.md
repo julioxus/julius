@@ -134,6 +134,7 @@ Use `tools/csv_parser.py` to parse.
 - NO filler sections (Description, Background, Remediation unless required)
 - NO AI phrases: "This report details", "It's important to note", "leveraging", "poses a significant risk"
 - Every word earns its place — if removing a sentence doesn't lose information, remove it
+- **Every command in the report must have been executed and verified working** — never write commands from memory
 
 ### Required Sections
 1. **Title**: `[VulnType] — [What] in [Where]` (under 80 chars)

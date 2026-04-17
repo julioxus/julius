@@ -319,6 +319,7 @@ Before finalizing any report, scan the markdown for:
 4. **First person**: At least one "I" statement in the report. Zero = rewrite.
 5. **Real URLs**: Every URL in Steps to Reproduce must be a real tested URL, never a placeholder like `https://[domain]` or `https://target.com`.
 6. **Screenshot references**: At least one `![` image embed referencing a real file. Zero = BLOCK.
+7. **Verified commands**: Every command (`curl`, HTTP request, script invocation) in the report must have been executed and confirmed working before inclusion. Never write commands from memory.
 
 ---
 
@@ -340,5 +341,6 @@ Before submission:
 - [ ] **No fabricated endpoints, placeholders, or generic templates**
 - [ ] **Methodology (runtime vs static vs inferred) clearly stated**
 - [ ] **Anti-AI writing check passed**: no banned phrases, under 500 words, first person, no filler
+- [ ] **All commands verified**: every command in the report was executed and confirmed working before inclusion — never written from memory
 - [ ] **Report reads like a human wrote it** — direct, concise, no padding
 

@@ -226,7 +226,7 @@ After all reports are written locally, run a **self-review pass** before present
 1. STEPS TO REPRODUCE — Reproducibility check:
    - [ ] All URLs are FULL (https://...), never relative paths
    - [ ] Auth method explained (how to get tokens/cookies)
-   - [ ] Every command is copy-pasteable and will work as written
+   - [ ] Every command is copy-pasteable and will work as written — **must have been executed and verified working before inclusion, never written from memory**
    - [ ] Request body matches the format that was actually tested (not the SAST assumption)
    - [ ] Expected responses documented (status codes, body snippets)
    - [ ] If a prerequisite exists (Redis injection, secret, 2nd account), it is listed as a numbered step

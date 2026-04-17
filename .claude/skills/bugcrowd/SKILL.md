@@ -393,6 +393,7 @@ saas_scope = [
 - NO filler: "This report details...", "It's important to note...", "leveraging...", "poses a significant risk..."
 - NO unnecessary sections — omit Remediation, Background, Description unless Bugcrowd requires them
 - Every sentence must add information. If removing it loses nothing, delete it.
+- **Every command in the report must have been executed and verified working** — never write commands from memory
 - Use `tools/report_validator.py` (from HackerOne tools — same checks apply) before submission
 
 ### Screenshot Requirements (CRITICAL)
