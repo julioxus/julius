@@ -1,9 +1,11 @@
 # /bounty-forecast - Bug Bounty Earnings Analysis & AI Forecast
 
-Analyzes Intigriti + HackerOne submissions, evaluates each pending report from a triager's perspective using engagement context from the database, and recommends the best programs to focus on.
+Analyzes Intigriti + HackerOne + Bugcrowd submissions, evaluates each pending report from a triager's perspective using engagement context from the database, and recommends the best programs to focus on.
+
+**Source of truth rule**: The platform dashboards are authoritative. Local DB `reports.status` and `submissions.disposition` can drift. Every run MUST re-sync all three platforms and reconcile local state from platform state — never the other way around.
 
 ## Trigger
-When user says: "bounty forecast", "bounty analysis", "how much money", "intigriti earnings", "intigriti forecast", "hackerone earnings", "hackerone forecast", "all bounties", "combined forecast", "analyze my bounties", "which programs should I focus on"
+When user says: "bounty forecast", "bounty analysis", "how much money", "intigriti earnings", "intigriti forecast", "hackerone earnings", "hackerone forecast", "bugcrowd earnings", "bugcrowd forecast", "all bounties", "combined forecast", "analyze my bounties", "which programs should I focus on"
 
 ## Requirements & Credentials
 
@@ -31,6 +33,17 @@ Two auth mechanisms, each used for different data:
   - Run `! python -m bounty_intel sync --source intigriti` to trigger Playwright login
   - Provide a fresh cookie manually
 
+### Bugcrowd (session cookies — researcher dashboard)
+Bugcrowd's public `api.bugcrowd.com` is **program-owner only**; researchers do not get API tokens. We authenticate against `bugcrowd.com/submissions.json` using session cookies.
+
+- Cookie sources (priority order):
+  1. `BUGCROWD_COOKIES_JSON` env var (JSON dict)
+  2. Cached cookies at `~/.bugcrowd/session_cookies.json` (validated against `session_meta.json` expiry)
+  3. DB-persisted cookies (pushed to server via `/admin/bugcrowd-cookies`)
+  4. Playwright browser login (local only — auto-launches browser)
+- **If cookies are expired**: sync returns `error: no_cookie`. Auto-fix via Playwright (see Step 1).
+- **List-view limitation**: The researcher endpoint does NOT include severity or bounty amount per submission. The sync records `substate` → disposition correctly (including `nue`, `not_reproducible`, `not_applicable`, `duplicate`, `resolved`), but severity defaults to Medium and bounty to 0. Forecast uses historical `payouts` for EV where available.
+
 ### Bounty Intel API
 - `BOUNTY_INTEL_API_KEY` in `.env` — for admin endpoints (refresh statuses, backfill)
 - Dashboard: https://bounty-dashboard-887002731862.europe-west1.run.app
@@ -39,16 +52,16 @@ Two auth mechanisms, each used for different data:
 
 ### Step 1: Sync platform data + refresh program statuses
 
-**MANDATORY before any forecast.** Sync both platforms with automatic cookie refresh and refresh derived data:
+**MANDATORY before any forecast.** Sync all three platforms with automatic cookie refresh and refresh derived data:
 
-1. **Initial sync attempt**: `bounty_sync(source="all")` — delta sync both platforms
+1. **Initial sync attempt**: `bounty_sync(source="all")` — delta sync HackerOne + Intigriti + Bugcrowd
 2. **Auto-fix Intigriti cookie issues**:
    - HackerOne: should show `upserted: N` (automatic via API token)
    - Intigriti: if `error: no_cookie`, **AUTOMATICALLY execute**:
      ```bash
      # Step 2a: Generate fresh cookie via Playwright
      cd .claude/skills/intigriti/tools && python intigriti_auth.py
-     
+
      # Step 2b: Push cookie to server and retry sync
      PYTHONPATH=/Users/jmartinez/repos/julius python -c "
      from bounty_intel.sync.intigriti import _push_cookie_to_server
@@ -57,29 +70,50 @@ Two auth mechanisms, each used for different data:
      _push_cookie_to_server(cookie)
      print('Cookie pushed to server')
      "
-     
+
      # Step 2c: Retry Intigriti sync with fresh cookie
-     # Should now succeed with fetched/upserted numbers
      ```
    - **DO NOT proceed until Intigriti sync succeeds** (no `error: no_cookie`)
-3. **Verify complete data**: Both platforms must show successful sync before continuing
-4. Refresh program statuses via API client:
+3. **Auto-fix Bugcrowd cookie issues**:
+   - Bugcrowd: if `error: no_cookie` (or fetched=0), **AUTOMATICALLY execute**:
+     ```bash
+     # Step 3a: Generate fresh cookies via Playwright
+     cd .claude/skills/bugcrowd/tools && python bugcrowd_auth.py
+
+     # Step 3b: Push cookies to server
+     PYTHONPATH=/Users/jmartinez/repos/julius python -c "
+     from bounty_intel.sync.bugcrowd import _push_cookies_to_server
+     from pathlib import Path
+     import json
+     cookies = json.loads((Path.home() / '.bugcrowd' / 'session_cookies.json').read_text())
+     _push_cookies_to_server(cookies)
+     print('Bugcrowd cookies pushed to server')
+     "
+
+     # Step 3c: Retry Bugcrowd sync
+     # bounty_sync(source="bugcrowd")
+     ```
+   - Alternative MCP path: `bounty_refresh_bugcrowd_session()` then retry `bounty_sync(source="bugcrowd")`
+   - **DO NOT proceed until Bugcrowd sync succeeds** — missing Bugcrowd data was the root cause of a past €1,900 EV over-estimate (platform showed 4/5 rejected that local DB still marked pending)
+4. **Verify complete data**: All three platforms must show successful sync before continuing
+5. **Reconcile local → platform**: If any local `reports.status` disagrees with platform `submissions.disposition` post-sync, update the report to match platform truth. Platform is the source of truth, always.
+6. Refresh program statuses via API client:
 ```python
 from bounty_intel.client import BountyIntelClient
 import requests
 client = BountyIntelClient()
-resp = requests.post(f"{client.api_url}/api/v1/admin/refresh-program-statuses", 
+resp = requests.post(f"{client.api_url}/api/v1/admin/refresh-program-statuses",
                     headers={"X-API-Key": client.api_key}, timeout=30)
 ```
 
 This ensures:
-- **Complete data from both platforms** — never proceed with partial data
-- **Fresh Intigriti cookies** obtained automatically when needed via Playwright browser
-- **Cookie pushed to Cloud Run server** so API-based syncs work
+- **Complete data from all three platforms** — never proceed with partial data
+- **Fresh cookies** obtained automatically when needed via Playwright browser (Intigriti + Bugcrowd)
+- **Cookies pushed to Cloud Run server** so API-based syncs work
 - Submissions, payouts, and report statuses are up to date
 - Program statuses reflect current platform state (open/active/paused/closed)
 
-**Note**: If Intigriti login fails or user cancels browser, stop the forecast process and report incomplete data warning.
+**Note**: If any platform login fails or user cancels browser, stop the forecast process and report incomplete data warning.
 
 ### Step 2: AI Triager Evaluation (done by Claude Code inline)
 
@@ -147,6 +181,9 @@ Direct the user there for the full visual experience with drill-down into progra
 
 ### States (HackerOne)
 new | triaged | needs-more-info | resolved | informative | duplicate | spam | not-applicable
+
+### Substates (Bugcrowd — from `bugcrowd.com/submissions.json`)
+nue (new/pending) | triaged | unresolved | resolved (PAID) | not_reproducible | not_applicable | out_of_scope | duplicate | wont_fix | informational
 
 ### Database CLI
 ```bash

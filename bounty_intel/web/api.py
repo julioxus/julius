@@ -777,6 +777,22 @@ async def push_intigriti_cookie(data: dict):
     return {"ok": True, "cookie_length": len(cookie)}
 
 
+@router.post("/admin/bugcrowd-cookies", dependencies=[Depends(verify_api_key)])
+async def push_bugcrowd_cookies(data: dict):
+    """Push fresh Bugcrowd cookies (full JSON dict) to the server for researcher-session syncs."""
+    import json as _json
+    cookies = data.get("cookies", "")
+    if not cookies:
+        raise HTTPException(400, "cookies field required (JSON string or object)")
+    if isinstance(cookies, dict):
+        cookies = _json.dumps(cookies)
+    import bounty_intel.config
+    from bounty_intel import service
+    bounty_intel.config.settings.bugcrowd_cookies_json = cookies
+    service.save_bugcrowd_cookies(cookies)
+    return {"ok": True, "cookies_length": len(cookies)}
+
+
 @router.post("/admin/sync-report-statuses", dependencies=[Depends(verify_api_key)])
 async def sync_report_statuses_endpoint():
     from bounty_intel.migration.import_existing import sync_report_statuses

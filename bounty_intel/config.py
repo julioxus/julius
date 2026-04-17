@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     intigriti_pat: str = ""
     bugcrowd_email: str = ""
     bugcrowd_token: str = ""
+    bugcrowd_cookies_json: str = ""  # JSON dict of cookies from researcher session (set by admin endpoint)
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

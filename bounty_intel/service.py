@@ -355,6 +355,31 @@ def get_intigriti_cookie() -> str | None:
     return None
 
 
+def save_bugcrowd_cookies(cookies_json: str) -> None:
+    """Persist Bugcrowd session cookies (full JSON dict) in sync_state metadata."""
+    with get_session() as s:
+        stmt = pg_insert(SyncState).values(
+            source="bugcrowd_cookies",
+            last_sync_at=_utcnow(),
+            sync_metadata={"cookies": cookies_json, "saved_at": _utcnow().isoformat()},
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["source"],
+            set_={"last_sync_at": _utcnow(), "sync_metadata": stmt.excluded.sync_metadata},
+        )
+        s.execute(stmt)
+        s.commit()
+
+
+def get_bugcrowd_cookies() -> str | None:
+    """Retrieve persisted Bugcrowd cookies JSON from DB."""
+    with get_session() as s:
+        state = s.get(SyncState, "bugcrowd_cookies")
+        if state and state.sync_metadata:
+            return state.sync_metadata.get("cookies")
+    return None
+
+
 def update_sync_state(source: str, last_submission_updated: datetime) -> None:
     with get_session() as s:
         stmt = pg_insert(SyncState).values(
