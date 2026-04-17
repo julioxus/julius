@@ -129,7 +129,8 @@ Use `tools/csv_parser.py` to parse.
 **Reports that look AI-generated get closed.** Write like a human researcher: direct, concise, first-person. See `/bounty-validation` Report Writing Quality Gate for full rules.
 
 ### Writing Rules
-- First person ("I found", "I tested") — never passive voice
+- First person for Summary/Impact ("I found", "I tested") — never passive voice
+- Steps to Reproduce: instructional style ("Send this request", "Open the page") — no first person
 - Under 500 words body text (excluding code blocks/HTTP dumps)
 - NO filler sections (Description, Background, Remediation unless required)
 - NO AI phrases: "This report details", "It's important to note", "leveraging", "poses a significant risk"
@@ -158,7 +159,7 @@ Use `tools/csv_parser.py` to parse.
 The image proxy at `/api/proxy` follows redirects to internal services. I accessed the cloud metadata endpoint and retrieved IAM credentials.
 
 ## Steps to Reproduce
-1. I sent this request through Burp Repeater:
+1. Send this request through Burp Repeater:
 ` ` `bash
 curl -v "https://app.example.com/api/proxy?url=http://169.254.169.254/latest/meta-data/iam/"
 ` ` `

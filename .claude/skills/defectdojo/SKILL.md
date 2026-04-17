@@ -117,7 +117,8 @@ sast_sink_object: "Http::get()"
 
 Even for internal DefectDojo reports, writing quality matters. Reports that read as AI-generated waste reviewer time and erode trust. See `/bounty-validation` Report Writing Quality Gate for full rules. Key points:
 
-- Write in first person: "I found", "I tested", "I noticed"
+- Write in first person for Summary/Impact: "I found", "I tested", "I noticed"
+- Steps to Reproduce: instructional style ("Send this request", "Open the page") — no first person
 - Be direct — state the vulnerability, the evidence, the impact. No filler.
 - NO AI phrases: "This report details", "It's important to note", "leveraging", "poses a significant risk", "Furthermore", "Additionally"
 - NO defining known concepts: reviewers know what SSRF is
@@ -143,7 +144,7 @@ Http::get($url); // No validation — user-controlled URL passed to HTTP client
 
 ## Steps to Reproduce
 
-1. I sent this request through Burp Repeater:
+1. Send this request through Burp Repeater:
    ` ` `bash
    curl -X POST https://example.com/api/vulnerable-endpoint \
      -H "Authorization: Bearer $TOKEN" \
@@ -256,7 +257,7 @@ After all reports are written locally, run a **self-review pass** before present
    - [ ] **Never**: simulated terminals, reconstructed responses, placeholder screenshots, AI-generated mock output
 
 5. WRITING QUALITY — Anti-AI check (see `/bounty-validation` Report Writing Quality Gate):
-   - [ ] First person voice used ("I found", "I tested") — no passive voice
+   - [ ] First person voice in Summary/Impact ("I found", "I tested") — Steps to Reproduce use instructional style
    - [ ] No banned AI phrases: "This report details", "It's important to note", "leveraging", "poses a significant risk", "could potentially", "Furthermore/Additionally" at sentence start
    - [ ] No filler — every sentence adds information. If removing it loses nothing, delete it.
    - [ ] No defining known security concepts (reviewers know what SSRF means)

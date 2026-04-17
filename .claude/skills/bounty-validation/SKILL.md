@@ -236,7 +236,8 @@ if not result["passed"]:
 ### Writing Style Rules
 
 **DO:**
-- Write in first person: "I found", "I tested", "I noticed"
+- Write in first person for Summary/Impact: "I found", "I tested", "I noticed"
+- Steps to Reproduce: use imperative/instructional style ("Send this request", "Open the page", "Observe the response") — no first person
 - Be direct — state the vulnerability, the endpoint, the impact. Nothing else.
 - Short sentences. One idea per sentence.
 - Reference your testing environment naturally (Burp Suite, browser version)
@@ -249,7 +250,7 @@ if not result["passed"]:
 - Concluding summaries: "In conclusion...", "To summarize...", "In summary..."
 - Defining known concepts: "XSS is a type of injection attack where..."
 - Marketing language: "devastating consequences", "poses a significant risk", "critical threat to"
-- Passive voice: "It was discovered that..." → "I found..."
+- Passive voice: "It was discovered that..." → "I found..." (Summary/Impact only)
 - Hedge phrases: "It's important to note", "It should be noted", "As demonstrated above"
 - Corporate AI vocabulary: "leveraging", "utilizing", "facilitating", "streamlining", "furthermore", "additionally", "consequently"
 - Repetitive structure: Don't repeat the same information in Summary, Description, and Impact

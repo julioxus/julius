@@ -388,7 +388,8 @@ saas_scope = [
 **Bugcrowd triagers actively reject reports that look AI-generated.** All reports must be direct, concise, and written in first person. See `/bounty-validation` Report Writing Quality Gate for complete rules.
 
 ### Key Rules
-- Write in first person: "I found", "I tested", "I noticed"
+- Write in first person for Summary/Impact: "I found", "I tested", "I noticed"
+- Steps to Reproduce: instructional style ("Send this request", "Open the page") — no first person
 - Keep body under 500 words (excluding code blocks and HTTP dumps)
 - NO filler: "This report details...", "It's important to note...", "leveraging...", "poses a significant risk..."
 - NO unnecessary sections — omit Remediation, Background, Description unless Bugcrowd requires them

@@ -3,7 +3,8 @@
 ## Writing Style (MANDATORY — Anti-AI Detection)
 
 **Reports that read as AI-generated get closed.** See `/bounty-validation` Report Writing Quality Gate for complete rules. Key points:
-- First person ("I found", "I tested") — never passive voice
+- First person for Summary/Impact ("I found", "I tested") — never passive voice
+- Steps to Reproduce: instructional style ("Send this request", "Open the page") — no first person
 - Under 500 words body (excluding code blocks)
 - No filler, no definitions, no marketing language
 - No banned AI phrases (see validation gate)
@@ -73,7 +74,7 @@
 Screenshots go **inline within Steps to Reproduce**, immediately after the step they prove. NEVER in a table at the end.
 
 ```markdown
-1. I sent this request through Burp Repeater:
+1. Send this request through Burp Repeater:
    ` ` `bash
    curl -v "https://real-target.com/api/endpoint" -d '{"param":"payload"}'
    ` ` `
