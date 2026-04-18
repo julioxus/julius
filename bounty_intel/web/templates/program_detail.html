@@ -208,8 +208,10 @@
   <!-- Coverage stats with detail drill-down from recon data -->
   {% set cov = attack_surface.get('coverage', {}) if attack_surface is mapping else {} %}
   {% if cov and cov is mapping %}
-  {% set recon_subs = recon_data.get('subdomains', {}) if recon_data is mapping else {} %}
-  {% set recon_gql = recon_data.get('graphql_schema', {}) if recon_data is mapping else {} %}
+  {% set _rs_raw = recon_data.get('subdomains', {}) if recon_data is mapping else {} %}
+  {% set recon_subs = _rs_raw if _rs_raw is mapping else {} %}
+  {% set _rg_raw = recon_data.get('graphql_schema', {}) if recon_data is mapping else {} %}
+  {% set recon_gql = _rg_raw if _rg_raw is mapping else {} %}
   {% set detail_map = {
     'live_hosts': (recon_subs.get('user_facing', []) + recon_subs.get('api_endpoints', [])) if recon_subs else [],
     'admin_panels': recon_subs.get('admin_panels', []) if recon_subs else [],
