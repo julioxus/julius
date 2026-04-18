@@ -7,8 +7,8 @@ Analyzes Intigriti + HackerOne + Bugcrowd submissions, evaluates each pending re
 **Scope rule — bug bounty platforms only**: This forecast covers ONLY Intigriti, HackerOne, and Bugcrowd submissions. DefectDojo is NOT a bug bounty platform and MUST NEVER be included in the forecast.
 - Do NOT sync, ingest, or create programs from `outputs/defectdojo-*/` directories.
 - Do NOT call `bounty_upsert_program(platform="defectdojo", ...)` or any variant — the skill does not accept "defectdojo" as a platform and never will.
-- If you encounter a `custom`-platform program that looks DefectDojo-related (handle/company mentions `dd-*`, `defectdojo`, `dojo`, `REDACTED`, `freepik`), flag it to the user and offer to delete it — do not include it in EV calculations.
-- DefectDojo findings/reports/evidence live exclusively in `outputs/defectdojo-{engagement}/` and are uploaded to the real DefectDojo instance (`defectdojo.internal`), never to bounty-intel. See `.claude/skills/defectdojo/SKILL.md` and `.claude/agents/CLAUDE.md` (exception rule, line 33).
+- If you encounter a `custom`-platform program that looks DefectDojo-related (handle/company mentions `dd-*`, `defectdojo`, `dojo`), flag it to the user and offer to delete it — do not include it in EV calculations.
+- DefectDojo findings/reports/evidence live exclusively in `outputs/defectdojo-{engagement}/` and are uploaded to the private DefectDojo instance (URL lives in `DEFECTDOJO_URL` env var, never hardcoded), never to bounty-intel. See `.claude/skills/defectdojo/SKILL.md` and `.claude/agents/CLAUDE.md` (exception rule, line 33).
 
 ## Trigger
 When user says: "bounty forecast", "bounty analysis", "how much money", "intigriti earnings", "intigriti forecast", "hackerone earnings", "hackerone forecast", "bugcrowd earnings", "bugcrowd forecast", "all bounties", "combined forecast", "analyze my bounties", "which programs should I focus on"

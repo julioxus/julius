@@ -39,7 +39,7 @@ Requires: `pip install playwright && playwright install chromium`
 
 ```
 # Only env vars needed
-export DEFECTDOJO_URL=https://defectdojo.internal
+export DEFECTDOJO_URL=<your-defectdojo-instance-url>
 export DEFECTDOJO_TOKEN=<your_api_key>
 ```
 
