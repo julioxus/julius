@@ -4,6 +4,12 @@ Analyzes Intigriti + HackerOne + Bugcrowd submissions, evaluates each pending re
 
 **Source of truth rule**: The platform dashboards are authoritative. Local DB `reports.status` and `submissions.disposition` can drift. Every run MUST re-sync all three platforms and reconcile local state from platform state — never the other way around.
 
+**Scope rule — bug bounty platforms only**: This forecast covers ONLY Intigriti, HackerOne, and Bugcrowd submissions. DefectDojo is NOT a bug bounty platform and MUST NEVER be included in the forecast.
+- Do NOT sync, ingest, or create programs from `outputs/defectdojo-*/` directories.
+- Do NOT call `bounty_upsert_program(platform="defectdojo", ...)` or any variant — the skill does not accept "defectdojo" as a platform and never will.
+- If you encounter a `custom`-platform program that looks DefectDojo-related (handle/company mentions `dd-*`, `defectdojo`, `dojo`, `REDACTED`, `freepik`), flag it to the user and offer to delete it — do not include it in EV calculations.
+- DefectDojo findings/reports/evidence live exclusively in `outputs/defectdojo-{engagement}/` and are uploaded to the real DefectDojo instance (`defectdojo.internal`), never to bounty-intel. See `.claude/skills/defectdojo/SKILL.md` and `.claude/agents/CLAUDE.md` (exception rule, line 33).
+
 ## Trigger
 When user says: "bounty forecast", "bounty analysis", "how much money", "intigriti earnings", "intigriti forecast", "hackerone earnings", "hackerone forecast", "bugcrowd earnings", "bugcrowd forecast", "all bounties", "combined forecast", "analyze my bounties", "which programs should I focus on"
 
@@ -54,7 +60,7 @@ Bugcrowd's public `api.bugcrowd.com` is **program-owner only**; researchers do n
 
 **MANDATORY before any forecast.** Sync all three platforms with automatic cookie refresh and refresh derived data:
 
-1. **Initial sync attempt**: `bounty_sync(source="all")` — delta sync HackerOne + Intigriti + Bugcrowd
+1. **Initial sync attempt**: `bounty_sync(source="all")` — delta sync HackerOne + Intigriti + Bugcrowd (NEVER DefectDojo; `source` only accepts `hackerone|intigriti|bugcrowd|all`)
 2. **Auto-fix Intigriti cookie issues**:
    - HackerOne: should show `upserted: N` (automatic via API token)
    - Intigriti: if `error: no_cookie`, **AUTOMATICALLY execute**:
