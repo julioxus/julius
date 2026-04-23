@@ -268,6 +268,12 @@ Canonical testing engine. 8 phases, 40+ attack types across 11 categories.
 
 ## Other Skills
 
+### Local Business Prospecting
+
+| Skill | Command | What it does |
+|-------|---------|-------------|
+| Prospect | `/prospect <company> <domain> [sector]` | Passive OSINT exposure report for local businesses. 8 parallel checks (headers, TLS, DNS, subdomains, Shodan, tech/EOL, email+breach, RGPD/LSSI-CE compliance). 7-category weighted scoring with PDF report (radar/bar charts + donut gauge). Batch mode for sector studies. |
+
 ### Vendor Security Assessment
 
 | Skill | Command | What it does |
@@ -372,6 +378,7 @@ julius/
 │   │   ├── hackerone/               # HackerOne orchestrator
 │   │   ├── intigriti/               # Intigriti orchestrator
 │   │   ├── defectdojo/              # DefectDojo orchestrator
+│   │   ├── prospect/                # Local business OSINT prospecting
 │   │   ├── vendor-security-assessment/
 │   │   ├── offensive/               # SAST, CVE, auth, AI threats, Web3 (7 skills)
 │   │   ├── recon/                   # Reconnaissance (10 skills)
@@ -417,6 +424,9 @@ claude .
 
 # DefectDojo assessment
 /defectdojo <product> <engagement>
+
+# Local business prospecting
+/prospect "Acme Corp" acmecorp.com tech
 
 # Vendor evaluation
 /vendor-security-assessment <vendor_name>
