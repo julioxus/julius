@@ -517,7 +517,7 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
         findings_html += f"""
         <div class="finding-card">
           <h3><span class="badge sev-{sev}">{sev_label}</span> &nbsp;Elementos de cumplimiento normativo no verificados</h3>
-          <p>No hemos podido verificar la presencia de los siguientes elementos
+          <p>No se ha podido verificar la presencia de los siguientes elementos
           obligatorios en la web. Esto no significa necesariamente que no existan,
           pero s&iacute; que no son f&aacute;cilmente localizables para un visitante
           o para los organismos reguladores:</p>
