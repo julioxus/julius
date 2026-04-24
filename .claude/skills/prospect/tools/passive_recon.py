@@ -235,17 +235,159 @@ def check_shodan(domain):
     return results
 
 
-def harvest_emails(domain):
-    """Harvest emails from public sources: website, Google cache, common patterns."""
-    results = {"raw": "", "emails": [], "sources": {}, "score": 10}
-    found = set()
+SPANISH_FIRST_NAMES = {
+    'Abel', 'Adrián', 'Adrian', 'Agustín', 'Agustin', 'Alberto', 'Alejandro',
+    'Alfonso', 'Alfredo', 'Alicia', 'Almudena', 'Álvaro', 'Alvaro', 'Amalia',
+    'Ana', 'Andrés', 'Andres', 'Ángel', 'Angel', 'Ángela', 'Angela', 'Antonio',
+    'Araceli', 'Ariadna', 'Arturo', 'Aurora', 'Beatriz', 'Belén', 'Belen',
+    'Blanca', 'Boris', 'Carlos', 'Carmen', 'Carolina', 'Catalina', 'Cecilia',
+    'Clara', 'Claudia', 'Concepción', 'Concha', 'Cristian', 'Cristina',
+    'Daniel', 'Daniela', 'David', 'Diana', 'Diego', 'Dolores', 'Eduardo',
+    'Elena', 'Elisa', 'Emilio', 'Enrique', 'Ernesto', 'Esther', 'Eugenia',
+    'Eva', 'Federico', 'Felipe', 'Fernando', 'Francisca', 'Francisco',
+    'Gabriel', 'Gemma', 'Gloria', 'Gonzalo', 'Guadalupe', 'Guillermo',
+    'Gustavo', 'Héctor', 'Hector', 'Hugo', 'Ignacio', 'Inés', 'Ines',
+    'Inmaculada', 'Irene', 'Isabel', 'Iván', 'Ivan', 'Jacobo', 'Jaime',
+    'Javier', 'Jesús', 'Jesus', 'Joaquín', 'Joaquin', 'Jorge', 'José',
+    'Jose', 'Josefa', 'Juan', 'Juana', 'Julia', 'Julián', 'Julian', 'Julio',
+    'Laura', 'Leonor', 'Lidia', 'Lorena', 'Lorenzo', 'Lourdes', 'Lucía',
+    'Lucia', 'Luis', 'Luisa', 'Manuel', 'Manuela', 'Marcos', 'Margarita',
+    'María', 'Maria', 'Mariano', 'Marina', 'Mario', 'Marta', 'Martín',
+    'Martin', 'Mateo', 'Mercedes', 'Miguel', 'Miriam', 'Mónica', 'Monica',
+    'Montserrat', 'Natalia', 'Nerea', 'Nicolás', 'Nicolas', 'Nuria',
+    'Óscar', 'Oscar', 'Pablo', 'Patricia', 'Paula', 'Pedro', 'Pilar',
+    'Rafael', 'Ramón', 'Ramon', 'Raquel', 'Raúl', 'Raul', 'Ricardo',
+    'Roberto', 'Rocío', 'Rocio', 'Rodrigo', 'Rosa', 'Rosario', 'Rubén',
+    'Ruben', 'Salvador', 'Samuel', 'Sandra', 'Santiago', 'Sara', 'Sergio',
+    'Silvia', 'Sofía', 'Sofia', 'Soledad', 'Sonia', 'Susana', 'Teresa',
+    'Tomás', 'Tomas', 'Valentín', 'Valentin', 'Verónica', 'Veronica',
+    'Vicente', 'Víctor', 'Victor', 'Victoria',
+}
 
-    # 1. Scrape from main website (contact page, footer, legal notice)
-    for path in ["", "/contacto", "/contact", "/about", "/sobre-nosotros",
-                  "/aviso-legal", "/legal", "/politica-privacidad", "/equipo", "/team"]:
+
+def _extract_people_names(html):
+    """Extract person names from Spanish web pages using a first-name whitelist."""
+    import html as html_mod
+    text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = html_mod.unescape(text)
+
+    junk_surnames = {
+        'Trustindex', 'Google', 'Facebook', 'Instagram', 'Orange', 'Movistar',
+        'Vodafone', 'Reviews', 'Rating', 'Stars', 'Cookie', 'Analytics',
+        'Services', 'Temporarily', 'Unavailable', 'Loading', 'Error',
+    }
+    pattern = r'([A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,})\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,})(?:\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,}))?'
+    names = []
+    for m in re.finditer(pattern, text):
+        first = m.group(1)
+        if first not in SPANISH_FIRST_NAMES:
+            continue
+        last = m.group(2)
+        if len(last) < 3 or last in junk_surnames:
+            continue
+        name = f"{first} {last}"
+        if m.group(3) and len(m.group(3)) >= 3 and m.group(3) not in junk_surnames:
+            name += f" {m.group(3)}"
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def _name_to_email_variants(name, domain):
+    """Generate email candidates from a Spanish name: nombre.apellido@, napellido@, etc."""
+    import unicodedata
+    def strip_accents(s):
+        return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+
+    parts = name.lower().split()
+    if len(parts) < 2:
+        return []
+    first = strip_accents(parts[0])
+    last = strip_accents(parts[1])
+    variants = [
+        f"{first}.{last}@{domain}",
+        f"{first[0]}{last}@{domain}",
+        f"{first}{last[0]}@{domain}",
+        f"{first}@{domain}",
+    ]
+    if len(parts) >= 3:
+        last2 = strip_accents(parts[2])
+        variants.append(f"{first}.{last}.{last2}@{domain}")
+    return variants
+
+
+def _search_engine_emails(domain):
+    """Harvest emails via Google and Bing search scraping."""
+    emails = {}
+    ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+
+    for engine, url in [
+        ("google", f'https://www.google.com/search?q=%22%40{domain}%22&num=50'),
+        ("google2", f'https://www.google.com/search?q=site%3A{domain}+email+OR+contacto+OR+contact&num=30'),
+        ("bing", f'https://www.bing.com/search?q=%22%40{domain}%22&count=50'),
+    ]:
+        raw = run_cmd(f'curl -sL -m 10 -H "User-Agent: {ua}" "{url}" 2>/dev/null')
+        if raw:
+            from urllib.parse import unquote
+            raw = unquote(raw)
+            found = set(re.findall(r'[a-zA-Z0-9._%+\-]+@' + re.escape(domain), raw))
+            for e in found:
+                e = e.lower().strip('.')
+                if len(e.split('@')[0]) >= 2:
+                    emails.setdefault(e, []).append(engine)
+    return emails
+
+
+def _crtsh_emails(domain):
+    """Extract emails from Certificate Transparency logs via crt.sh."""
+    emails = {}
+    raw = run_cmd(f'curl -s -m 15 "https://crt.sh/?q=%25{domain}&output=json"', timeout=20)
+    if not raw or "[TIMEOUT]" in raw:
+        return emails
+    try:
+        data = json.loads(raw)
+        for entry in data:
+            for name in entry.get("name_value", "").split("\n"):
+                if "@" in name and domain in name:
+                    emails.setdefault(name.strip().lower(), []).append("crt.sh")
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return emails
+
+
+def harvest_emails(domain):
+    """Harvest emails from multiple OSINT sources: search engines, crt.sh, website, people names."""
+    results = {"raw": "", "emails": [], "sources": {}, "people": [], "score": 10}
+    found = set()
+    all_people = []
+    page_cache = {}
+
+    search_emails = _search_engine_emails(domain)
+    for e, sources in search_emails.items():
+        found.add(e)
+        results["sources"].setdefault(e, []).extend(sources)
+    results["raw"] += f"--- Search engines: {len(search_emails)} emails ---\n"
+    for e, s in search_emails.items():
+        results["raw"] += f"  {e} ({', '.join(s)})\n"
+
+    crt_emails = _crtsh_emails(domain)
+    for e, sources in crt_emails.items():
+        found.add(e)
+        results["sources"].setdefault(e, []).extend(sources)
+    results["raw"] += f"--- crt.sh: {len(crt_emails)} emails ---\n"
+
+    pages = ["", "/contacto", "/contact", "/about", "/sobre-nosotros",
+             "/aviso-legal", "/legal", "/politica-privacidad", "/equipo", "/team",
+             "/quienes-somos", "/nuestro-equipo", "/profesionales", "/staff"]
+    for path in pages:
         raw = run_cmd(f'curl -sL -m 8 https://www.{domain}{path} 2>/dev/null')
-        if not raw or "[TIMEOUT]" in raw:
+        if not raw or "[TIMEOUT]" in raw or len(raw) < 200:
             raw = run_cmd(f'curl -sL -m 8 https://{domain}{path} 2>/dev/null')
+        if not raw or "[TIMEOUT]" in raw:
+            continue
+        page_cache[path] = raw
         emails_in_page = set(re.findall(
             r'[a-zA-Z0-9._%+\-]+@' + re.escape(domain), raw
         ))
@@ -255,7 +397,27 @@ def harvest_emails(domain):
             results["sources"].setdefault(e, []).append(f"website:{path or '/'}")
         results["raw"] += f"--- {path or '/'} ---\n{','.join(emails_in_page) or 'none'}\n"
 
-    # 2. Common email patterns (generate candidates)
+    people_pages = ["/equipo", "/team", "/quienes-somos", "/nuestro-equipo",
+                    "/profesionales", "/staff", "/about", "/sobre-nosotros", ""]
+    for path in people_pages:
+        html = page_cache.get(path, "")
+        if html:
+            names = _extract_people_names(html)
+            for n in names:
+                if n not in all_people:
+                    all_people.append(n)
+
+    results["raw"] += f"\n--- People found: {len(all_people)} ---\n"
+    for person in all_people[:15]:
+        results["raw"] += f"  {person}\n"
+        variants = _name_to_email_variants(person, domain)
+        for v in variants:
+            if v not in found:
+                found.add(v)
+                results["sources"].setdefault(v, []).append(f"person:{person}")
+
+    results["people"] = all_people[:15]
+
     common_prefixes = ["info", "contacto", "admin", "administracion",
                        "legal", "recepcion", "oficina", "hola", "contact"]
     for prefix in common_prefixes:
@@ -265,20 +427,79 @@ def harvest_emails(domain):
             found.add(candidate)
 
     results["emails"] = sorted(found)
-    results["raw"] += f"\n--- Total: {len(found)} emails ({len([e for e,s in results['sources'].items() if 'website' in str(s)])} from website) ---\n"
+    osint_count = len([e for e, s in results["sources"].items()
+                       if any(x in str(s) for x in ["google", "bing", "crt.sh"])])
+    website_count = len([e for e, s in results["sources"].items() if any("website" in x for x in s)])
+    people_count = len([e for e, s in results["sources"].items() if any("person:" in x for x in s)])
+    results["raw"] += f"\n--- Total: {len(found)} emails ({osint_count} OSINT, {website_count} website, {people_count} people, {len(common_prefixes)} patterns) ---\n"
     return results
 
 
-def check_breaches(domain, emails):
-    """Check harvested emails against HIBP and public breach APIs.
+def _check_xposedornot(email):
+    """Query XposedOrNot breach-analytics API (free, no auth)."""
+    raw = run_cmd(
+        f'curl -s -m 15 '
+        f'"https://api.xposedornot.com/v1/breach-analytics?email={email}"',
+        timeout=20
+    )
+    if not raw or "[TIMEOUT]" in raw or "[ERROR" in raw:
+        return None, raw or ""
+    try:
+        data = json.loads(raw)
+        exposed = data.get("ExposedBreaches") or {}
+        breaches_detail = exposed.get("breaches_details") or []
+        if not breaches_detail:
+            return None, raw
+        breach_names = [b.get("breach", "?") for b in breaches_detail]
+        return {
+            "email": email,
+            "breaches": breach_names,
+            "count": len(breach_names),
+            "risk_score": data.get("BreachMetrics", {}).get("risk_score", 0),
+        }, raw
+    except (json.JSONDecodeError, TypeError, KeyError):
+        return None, raw
 
-    Uses HIBP API v3 if HIBP_API_KEY is set in environment.
-    Falls back to the free breachdirectory or domain-level check.
+
+def _check_leakcheck(email):
+    """Query LeakCheck public API (free, rate-limited)."""
+    raw = run_cmd(
+        f'curl -s -m 15 '
+        f'"https://leakcheck.io/api/public?check={email}"',
+        timeout=20
+    )
+    if not raw or "[TIMEOUT]" in raw or "[ERROR" in raw:
+        return None, raw or ""
+    try:
+        data = json.loads(raw)
+        if not data.get("found"):
+            return None, raw
+        sources = data.get("sources", [])
+        breach_names = [s.get("name", "?") for s in sources if s.get("name")]
+        return {
+            "email": email,
+            "breaches": breach_names,
+            "count": data.get("found", 0),
+            "fields": data.get("fields", []),
+        }, raw
+    except (json.JSONDecodeError, TypeError, KeyError):
+        return None, raw
+
+
+def check_breaches(domain, emails):
+    """Check emails against XposedOrNot (primary) + LeakCheck (secondary).
+
+    Uses HIBP API v3 if HIBP_API_KEY is set (paid, most comprehensive).
+    Otherwise uses free APIs: XposedOrNot for detailed analytics,
+    LeakCheck for additional coverage.
     """
+    import time
+
     results = {
         "raw": "", "breached_emails": [], "breach_count": 0,
         "breaches": [], "score": 10, "api_used": "none"
     }
+    seen_emails = set()
 
     hibp_key = os.environ.get("HIBP_API_KEY", "")
 
@@ -290,71 +511,61 @@ def check_breaches(domain, emails):
                 f'-H "user-agent: julius-prospect-recon" '
                 f'"https://haveibeenpwned.com/api/v3/breachedaccount/{email}?truncateResponse=true"'
             )
-            results["raw"] += f"--- {email} ---\n{raw}\n"
-
+            results["raw"] += f"--- hibp:{email} ---\n{raw}\n"
             if raw and "[TIMEOUT]" not in raw and "404" not in raw:
                 try:
                     breaches = json.loads(raw)
                     if isinstance(breaches, list) and breaches:
                         breach_names = [b.get("Name", "?") for b in breaches]
                         results["breached_emails"].append({
-                            "email": email,
-                            "breaches": breach_names,
+                            "email": email, "breaches": breach_names,
                             "count": len(breaches)
                         })
+                        seen_emails.add(email)
                         results["breach_count"] += len(breaches)
                         for bn in breach_names:
                             if bn not in results["breaches"]:
                                 results["breaches"].append(bn)
                 except (json.JSONDecodeError, TypeError):
                     pass
-
-            # HIBP rate limit: 1 request per 1.5 seconds on paid plan
-            import time
             time.sleep(1.6)
     else:
-        # Fallback: domain-level check via HIBP public (no per-email, just domain presence)
-        results["api_used"] = "hibp-domain-public"
-        raw = run_cmd(
-            f'curl -s -m 10 -H "user-agent: julius-prospect-recon" '
-            f'"https://haveibeenpwned.com/api/v3/breaches"'
-        )
-        if raw and "[TIMEOUT]" not in raw:
-            try:
-                all_breaches = json.loads(raw)
-                domain_lower = domain.lower()
-                for b in all_breaches:
-                    b_domain = b.get("Domain", "").lower()
-                    if b_domain == domain_lower:
-                        results["breaches"].append(b.get("Name", "?"))
-                        results["breach_count"] += 1
-                results["raw"] += f"Domain match in HIBP breach list: {results['breaches']}\n"
-            except (json.JSONDecodeError, TypeError):
-                pass
+        results["api_used"] = "xposedornot+leakcheck"
 
-        # Also try breachdirectory free check
-        raw2 = run_cmd(
-            f'curl -s -m 10 "https://breachdirectory.org/api/check?term={domain}&type=domain" '
-            f'-H "user-agent: julius-prospect-recon"'
-        )
-        results["raw"] += f"--- breachdirectory ---\n{raw2}\n"
-        if raw2 and "found" in raw2.lower():
-            try:
-                bd_data = json.loads(raw2)
-                if bd_data.get("found"):
-                    results["breach_count"] += 1
-                    results["raw"] += "Domain found in BreachDirectory\n"
-            except (json.JSONDecodeError, TypeError):
-                pass
+        for email in emails:
+            hit, raw = _check_xposedornot(email)
+            results["raw"] += f"--- xon:{email} ---\n{raw[:500]}\n"
+            if hit:
+                results["breached_emails"].append(hit)
+                seen_emails.add(email)
+                results["breach_count"] += hit["count"]
+                for bn in hit["breaches"]:
+                    if bn not in results["breaches"]:
+                        results["breaches"].append(bn)
+            time.sleep(0.5)
 
-    # Scoring
-    if results["breach_count"] == 0:
+        for email in emails:
+            if email in seen_emails:
+                continue
+            hit, raw = _check_leakcheck(email)
+            results["raw"] += f"--- lc:{email} ---\n{raw[:500]}\n"
+            if hit:
+                results["breached_emails"].append(hit)
+                seen_emails.add(email)
+                results["breach_count"] += hit["count"]
+                for bn in hit["breaches"]:
+                    if bn not in results["breaches"]:
+                        results["breaches"].append(bn)
+            time.sleep(1.0)
+
+    breached_count = len(results["breached_emails"])
+    if breached_count == 0:
         results["score"] = 10
-    elif results["breach_count"] <= 2:
+    elif breached_count <= 2:
         results["score"] = 7
-    elif results["breach_count"] <= 5:
+    elif breached_count <= 5:
         results["score"] = 5
-    elif results["breach_count"] <= 10:
+    elif breached_count <= 10:
         results["score"] = 3
     else:
         results["score"] = 1
@@ -533,12 +744,16 @@ def run_recon(domain, output_dir, company="", sector=""):
             except Exception as e:
                 results[name] = {"error": str(e), "score": 5}
 
-    # Breach check runs after email harvesting (sequential dependency)
-    harvested = results.get("emails", {}).get("emails", [])
+    # Breach check: prioritize real emails (OSINT/website) over generated patterns
+    email_data = results.get("emails", {})
+    sources = email_data.get("sources", {})
+    real = [e for e, s in sources.items() if not all("common-pattern" in x for x in s)]
+    patterns = [e for e, s in sources.items() if all("common-pattern" in x for x in s)]
+    prioritized = real + patterns
     try:
-        results["breach"] = check_breaches(domain, harvested)
+        results["breach"] = check_breaches(domain, prioritized[:25])
     except Exception as e:
-        results["breach"] = {"error": str(e), "score": 7, "breached_emails": [], "emails_checked": harvested}
+        results["breach"] = {"error": str(e), "score": 7, "breached_emails": [], "emails_checked": prioritized[:25]}
 
     for name, data in results.items():
         raw = data.get("raw", "")
