@@ -316,9 +316,10 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
             cms_html = f"<p>La web est&aacute; construida con <strong>{escape(cms_name)}</strong>, un gestor de contenidos que requiere actualizaciones peri&oacute;dicas de seguridad.</p>"
         plugins_html = ""
         if plugins_detected:
-            plugins_html = f"""<p>Adem&aacute;s, se han identificado <strong>{len(plugins_detected)}
-            componentes adicionales</strong> (plugins) instalados en la web, cada uno de los cuales
-            puede contener sus propios fallos de seguridad si no se mantiene actualizado.</p>"""
+            plugin_list = ", ".join(escape(p) for p in plugins_detected)
+            plugins_html = f"""<p>Se han identificado <strong>{len(plugins_detected)}
+            componentes adicionales</strong> (plugins) instalados en la web: {plugin_list}.
+            Cada uno puede contener sus propios fallos de seguridad si no se mantiene actualizado.</p>"""
         cve_html = ""
         if cve_findings:
             total_all = sum(cf.get("cves_total", 0) for cf in cve_findings)
