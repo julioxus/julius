@@ -288,13 +288,15 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
     def _sev(s):
         return ("critical", "Alta") if s < 5 else ("medium", "Media")
 
-    # Technology finding (EOL software, version disclosure) — highest impact, shown first
+    # Technology finding (EOL software, version disclosure, CVEs) — highest impact, shown first
     tks = scores.get("tech", 5)
     eol_software = tech_data.get("eol_software", [])
     version_disclosure = tech_data.get("version_disclosure", [])
     cms_name = tech_data.get("cms", "")
-    if tks < 8:
-        sev, sev_label = _sev(tks)
+    cve_findings = tech_data.get("cve_findings", [])
+    plugins_detected = tech_data.get("plugins", [])
+    if tks < 8 or cve_findings:
+        sev, sev_label = _sev(min(tks, 7) if cve_findings else tks)
         eol_html = ""
         if eol_software:
             for eol in eol_software:
@@ -304,19 +306,48 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
                 y no ser&aacute; corregida hasta que se actualice.</p>"""
         disclosure_html = ""
         if version_disclosure:
-            items = ", ".join(escape(v) for v in version_disclosure)
+            items = ", ".join(escape(v) for v in version_disclosure[:6])
             disclosure_html = f"""<p>El servidor revela informaci&oacute;n t&eacute;cnica en las
             cabeceras: {items}. Esto facilita a un atacante buscar vulnerabilidades espec&iacute;ficas
             para esas versiones.</p>"""
         cms_html = ""
         if cms_name:
-            cms_html = f"<p>CMS detectado: <strong>{escape(cms_name)}</strong> (debe verificarse que est&eacute; actualizado).</p>"
+            cms_html = f"<p>CMS detectado: <strong>{escape(cms_name)}</strong></p>"
+        plugins_html = ""
+        if plugins_detected:
+            plugin_list = ", ".join(escape(p) for p in plugins_detected[:8])
+            plugins_html = f"<p>Plugins detectados: {plugin_list}</p>"
+        cve_html = ""
+        if cve_findings:
+            cve_html = "<h4 style='margin:10px 0 5px;font-size:10pt'>Vulnerabilidades conocidas (fuente: NIST NVD)</h4>"
+            for cf in cve_findings:
+                total = cf.get("cves_total", 0)
+                critical = cf.get("critical", 0)
+                high = cf.get("high", 0)
+                sw = escape(cf.get("software", ""))
+                badge_color = "#dc2626" if critical > 0 else "#f59e0b" if high > 0 else "#3b82f6"
+                cve_html += f"""<div style="margin:6px 0;padding:6px 10px;background:#f8fafc;border-left:3px solid {badge_color};font-size:9pt">
+                  <strong>{sw}</strong> &mdash; {total} CVEs conocidos"""
+                if critical > 0:
+                    cve_html += f" (<span style='color:#dc2626;font-weight:bold'>{critical} cr&iacute;ticos</span>)"
+                if high > 0:
+                    cve_html += f" (<span style='color:#ea580c;font-weight:bold'>{high} altos</span>)"
+                samples = cf.get("sample_cves", [])
+                if samples:
+                    cve_html += "<ul style='margin:4px 0 0;padding-left:18px'>"
+                    for cve_id, score, desc in samples[:3]:
+                        score_color_val = "#dc2626" if score >= 9.0 else "#ea580c" if score >= 7.0 else "#f59e0b" if score >= 4.0 else "#22c55e"
+                        short_desc = escape(desc[:120]) + ("..." if len(desc) > 120 else "")
+                        cve_html += f"<li><strong style='color:{score_color_val}'>{escape(str(cve_id))}</strong> (CVSS {score}) &mdash; {short_desc}</li>"
+                    cve_html += "</ul>"
+                cve_html += "</div>"
         findings_html += f"""
         <div class="finding-card">
           <h3><span class="badge sev-{sev}">{sev_label}</span> &nbsp;Software obsoleto y/o informaci&oacute;n t&eacute;cnica expuesta</h3>
-          {eol_html}{disclosure_html}{cms_html}
+          {eol_html}{disclosure_html}{cms_html}{plugins_html}{cve_html}
           <p><span class="risk-label">Riesgo:</span> Operar con software sin soporte de seguridad supone un
-          riesgo significativo. En caso de brecha de datos, el uso de software obsoleto podr&iacute;a
+          riesgo significativo. Las vulnerabilidades listadas son p&uacute;blicamente conocidas y pueden ser
+          explotadas por atacantes. En caso de brecha de datos, el uso de software obsoleto podr&iacute;a
           considerarse negligencia en el cumplimiento del RGPD (multas de hasta el 4% de la facturaci&oacute;n).</p>
         </div>"""
 
@@ -334,16 +365,52 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
           con emails que pasan los filtros de spam habituales.</p>
         </div>"""
 
-    # TLS finding
+    # TLS finding (Qualys-style breakdown)
     ts = scores.get("tls", 5)
+    tls_data = load_evidence_json(evidence_dir, "tls.json")
+    tls_grade = tls_data.get("tls_grade", "?")
+    tls_total = tls_data.get("tls_score", 0)
+    tls_comps = tls_data.get("tls_components", {})
+    tls_protos = tls_data.get("protocols", {})
+    tls_cert = tls_data.get("cert", {})
+    tls_ciphers = tls_data.get("ciphers", {})
+    tls_vulns = tls_data.get("vulnerabilities", [])
+    tls_legacy = tls_data.get("legacy_tls", [])
     if ts < 8:
         sev, sev_label = _sev(ts)
-        tls_detail = escape(details.get("tls", ""))
-        tls_body = f"<p>{tls_detail}</p>" if tls_detail else ""
+        proto_items = ", ".join(f"{k}: {'&#10004;' if v else '&#10008;'}" for k, v in tls_protos.items()) if tls_protos else ""
+        proto_html = f"<p><strong>Protocolos:</strong> {proto_items}</p>" if proto_items else ""
+        legacy_html = ""
+        if tls_legacy:
+            legacy_html = f"<p>&#9888; Protocolos obsoletos habilitados: <strong>{', '.join(escape(l) for l in tls_legacy)}</strong>. Deben desactivarse.</p>"
+        cert_html = ""
+        if tls_cert.get("key_bits"):
+            key_label = f"{tls_cert.get('key_type', 'RSA')} {tls_cert['key_bits']} bits"
+            cert_html = f"<p><strong>Certificado:</strong> {escape(key_label)}, {escape(tls_cert.get('sig_algo', ''))}"
+            if tls_cert.get("ocsp_stapling"):
+                cert_html += ", OCSP stapling activo"
+            cert_html += "</p>"
+        cipher_html = ""
+        if tls_ciphers.get("negotiated"):
+            cipher_html = f"<p><strong>Cifrado negociado:</strong> {escape(tls_ciphers['negotiated'])}</p>"
+        weak = tls_ciphers.get("weak", {})
+        if weak:
+            weak_names = ", ".join(weak.keys())
+            cipher_html += f"<p>&#9888; Cifrados d&eacute;biles aceptados: <strong>{escape(weak_names)}</strong></p>"
+        vuln_html = ""
+        if tls_vulns:
+            vuln_html = "<p><strong>Vulnerabilidades:</strong> " + ", ".join(escape(v) for v in tls_vulns) + "</p>"
+        score_bar = f"""<p><strong>Puntuaci&oacute;n SSL (metodolog&iacute;a Qualys):</strong> {tls_total}/100 &mdash; Grade {escape(tls_grade)}</p>
+        <table style="width:100%;font-size:9pt;margin:4px 0">
+          <tr><td style="width:35%">Protocolo</td><td><div class="area-bar" style="height:10px"><div class="area-bar-fill" style="width:{tls_comps.get('protocol',0)}%;background:{score_color(tls_comps.get('protocol',0)//10)}"></div></div></td><td style="width:15%;text-align:right">{tls_comps.get('protocol',0)}/100</td></tr>
+          <tr><td>Intercambio de claves</td><td><div class="area-bar" style="height:10px"><div class="area-bar-fill" style="width:{tls_comps.get('key_exchange',0)}%;background:{score_color(tls_comps.get('key_exchange',0)//10)}"></div></div></td><td style="text-align:right">{tls_comps.get('key_exchange',0)}/100</td></tr>
+          <tr><td>Fortaleza del cifrado</td><td><div class="area-bar" style="height:10px"><div class="area-bar-fill" style="width:{tls_comps.get('cipher_strength',0)}%;background:{score_color(tls_comps.get('cipher_strength',0)//10)}"></div></div></td><td style="text-align:right">{tls_comps.get('cipher_strength',0)}/100</td></tr>
+        </table>"""
         findings_html += f"""
         <div class="finding-card">
           <h3><span class="badge sev-{sev}">{sev_label}</span> &nbsp;Configuraci&oacute;n SSL/TLS mejorable</h3>
-          {tls_body}
+          {score_bar}
+          {proto_html}{legacy_html}{cert_html}{cipher_html}{vuln_html}
           <p><span class="risk-label">Riesgo:</span> Una configuraci&oacute;n TLS d&eacute;bil permite
           que un atacante en la misma red intercepte comunicaciones entre los clientes y el servidor,
           incluyendo datos personales, credenciales y formularios.</p>
@@ -525,7 +592,16 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
     if website_emails:
         recs_medium.append("Retirar las direcciones de email visibles en la web y sustituirlas por formularios de contacto")
 
-    if cms_name:
+    if cve_findings:
+        for cf in cve_findings:
+            sw = escape(cf.get("software", ""))
+            n_crit = cf.get("critical", 0)
+            n_total = cf.get("cves_total", 0)
+            if n_crit > 0:
+                recs_high.append(f"Actualizar <strong>{sw}</strong> urgentemente &mdash; {n_total} vulnerabilidades conocidas ({n_crit} cr&iacute;ticas)")
+            elif n_total > 0:
+                recs_medium.append(f"Actualizar <strong>{sw}</strong> &mdash; {n_total} vulnerabilidades conocidas")
+    elif cms_name:
         recs_medium.append(f"Verificar y actualizar {escape(cms_name)} a la &uacute;ltima versi&oacute;n")
     if hs < 8:
         recs_medium.append("A&ntilde;adir cabeceras de seguridad web (HSTS, CSP, X-Frame-Options)")

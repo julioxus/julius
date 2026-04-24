@@ -78,50 +78,296 @@ def check_headers(domain):
 
 
 def check_tls(domain):
-    """Check TLS configuration."""
-    results = {"raw": "", "version": "", "issuer": "", "expiry": "", "legacy_tls": [], "score": 10}
+    """Comprehensive TLS check with Qualys-style scoring.
 
-    raw = run_cmd(
-        f'echo | openssl s_client -connect {domain}:443 -servername {domain} 2>/dev/null | openssl x509 -noout -dates -issuer -subject 2>/dev/null'
+    Scoring methodology (mirrors SSL Labs):
+      Protocol support:   30% weight
+      Key exchange:       30% weight
+      Cipher strength:    40% weight
+    Grade caps applied for critical weaknesses.
+    Final 0-100 mapped to 0-10 for the prospect score.
+    """
+    results = {
+        "raw": "", "version": "", "issuer": "", "expiry": "",
+        "legacy_tls": [], "score": 10,
+        "protocols": {}, "cert": {}, "ciphers": {},
+        "vulnerabilities": [], "tls_grade": "?",
+    }
+
+    base = f"echo | openssl s_client -connect {domain}:443 -servername {domain}"
+
+    # --- Certificate details ---
+    cert_raw = run_cmd(
+        f'{base} 2>/dev/null | openssl x509 -noout -dates -issuer -subject'
+        f' -serial -ext subjectAltName -fingerprint -text 2>/dev/null'
     )
-    results["raw"] = raw
+    results["raw"] += f"--- Certificate ---\n{cert_raw}\n"
 
-    for line in raw.split("\n"):
-        if "notAfter" in line:
-            results["expiry"] = line.split("=", 1)[1].strip() if "=" in line else ""
-        if "issuer" in line:
-            results["issuer"] = line.split("=", 1)[1].strip() if "=" in line else ""
+    for line in cert_raw.split("\n"):
+        if "notAfter" in line and "=" in line:
+            results["expiry"] = line.split("=", 1)[1].strip()
+        if "notBefore" in line and "=" in line:
+            results["cert"]["not_before"] = line.split("=", 1)[1].strip()
+        if "issuer" in line.lower() and "=" in line:
+            results["issuer"] = line.split("=", 1)[1].strip()
 
-    version_raw = run_cmd(
-        f'echo | openssl s_client -connect {domain}:443 -servername {domain} 2>/dev/null | grep "Protocol"'
+    key_info = run_cmd(
+        f'{base} 2>/dev/null | openssl x509 -noout -text 2>/dev/null'
+        f' | grep -E "Public-Key:|Signature Algorithm:|Public Key Algorithm"'
     )
-    results["version"] = version_raw.strip()
+    results["raw"] += f"--- Key info ---\n{key_info}\n"
 
-    for legacy in ["tls1", "tls1_1"]:
-        flag = f"-{legacy}"
-        check = run_cmd(
-            f'echo | openssl s_client {flag} -connect {domain}:443 -servername {domain} 2>&1 | head -5'
-        )
-        if "CONNECTED" in check and "error" not in check.lower():
-            results["legacy_tls"].append(legacy.replace("tls", "TLS ").replace("_", "."))
-            results["score"] -= 3
+    key_bits = 0
+    key_type = "RSA"
+    sig_algo = ""
+    for line in key_info.split("\n"):
+        if "Public-Key" in line:
+            m = re.search(r'\((\d+) bit\)', line)
+            if m:
+                key_bits = int(m.group(1))
+        if "Public Key Algorithm" in line:
+            algo_lower = line.lower()
+            if "ec" in algo_lower or "ecdsa" in algo_lower:
+                key_type = "ECC"
+            elif "ed25519" in algo_lower or "ed448" in algo_lower:
+                key_type = "EdDSA"
+        if "Signature Algorithm" in line:
+            sig_algo = line.split(":", 1)[1].strip() if ":" in line else ""
+    results["cert"]["key_bits"] = key_bits
+    results["cert"]["key_type"] = key_type
+    results["cert"]["sig_algo"] = sig_algo
 
+    chain_raw = run_cmd(f'{base} 2>/dev/null | grep -c "BEGIN CERTIFICATE"')
+    chain_depth = 0
+    try:
+        chain_depth = int(chain_raw.strip())
+    except ValueError:
+        pass
+    results["cert"]["chain_depth"] = chain_depth
+
+    # --- Certificate expiry ---
     if results["expiry"]:
         try:
             exp_date = datetime.strptime(results["expiry"], "%b %d %H:%M:%S %Y %Z")
             days_left = (exp_date - datetime.utcnow()).days
             if days_left < 0:
-                results["score"] = max(0, results["score"] - 5)
                 results["cert_status"] = f"CADUCADO hace {abs(days_left)} días"
+                results["cert"]["expired"] = True
             elif days_left < 30:
-                results["score"] = max(0, results["score"] - 2)
                 results["cert_status"] = f"Caduca en {days_left} días"
+                results["cert"]["days_left"] = days_left
             else:
                 results["cert_status"] = f"Válido ({days_left} días restantes)"
+                results["cert"]["days_left"] = days_left
         except ValueError:
             results["cert_status"] = "No se pudo determinar"
 
+    # --- Protocol support ---
+    protocol_tests = [
+        ("ssl3", "-ssl3", "SSLv3"),
+        ("tls1", "-tls1", "TLS 1.0"),
+        ("tls1_1", "-tls1_1", "TLS 1.1"),
+        ("tls1_2", "-tls1_2", "TLS 1.2"),
+        ("tls1_3", "-tls1_3", "TLS 1.3"),
+    ]
+    for key, flag, label in protocol_tests:
+        check = run_cmd(
+            f'echo | openssl s_client {flag} -connect {domain}:443'
+            f' -servername {domain} 2>&1 | head -10'
+        )
+        supported = "CONNECTED" in check and "error" not in check.lower() and "wrong version" not in check.lower()
+        results["protocols"][label] = supported
+        if supported and label in ("TLS 1.0", "TLS 1.1"):
+            results["legacy_tls"].append(label)
+    results["raw"] += f"--- Protocols ---\n{json.dumps(results['protocols'])}\n"
+
+    version_raw = run_cmd(f'{base} 2>/dev/null | grep "Protocol"')
+    results["version"] = version_raw.strip()
+
+    # --- Cipher suite analysis ---
+    weak_ciphers = {"RC4": [], "DES": [], "3DES": [], "NULL": [], "EXPORT": [], "MD5": []}
+    conn_raw = run_cmd(f'{base} 2>&1')
+    current_cipher = ""
+    for line in conn_raw.split("\n"):
+        if "Cipher    :" in line or "Cipher is" in line:
+            current_cipher = line.split(":")[-1].strip() if ":" in line else line.split("is")[-1].strip()
+    results["ciphers"]["negotiated"] = current_cipher
+
+    for weak_name, flag in [("RC4", "RC4"), ("DES", "DES"), ("3DES", "3DES"), ("NULL", "NULL"), ("EXPORT", "EXPORT")]:
+        check = run_cmd(
+            f'echo | openssl s_client -cipher {flag} -connect {domain}:443'
+            f' -servername {domain} 2>&1 | head -5',
+            timeout=10
+        )
+        if "CONNECTED" in check and "error" not in check.lower():
+            weak_ciphers[weak_name].append(flag)
+    results["ciphers"]["weak"] = {k: v for k, v in weak_ciphers.items() if v}
+    results["raw"] += f"--- Ciphers ---\nnegotiated: {current_cipher}\nweak: {json.dumps(results['ciphers']['weak'])}\n"
+
+    # --- OCSP stapling ---
+    ocsp_raw = run_cmd(
+        f'{base} -status 2>/dev/null | grep -A 2 "OCSP Response"',
+        timeout=10
+    )
+    results["cert"]["ocsp_stapling"] = "OCSP Response Status: successful" in ocsp_raw
+    results["raw"] += f"--- OCSP ---\n{ocsp_raw}\n"
+
+    # --- Secure renegotiation ---
+    reneg_raw = run_cmd(f'{base} 2>/dev/null | grep -i "renegotiation"')
+    results["cert"]["secure_reneg"] = "secure" in reneg_raw.lower()
+    results["raw"] += f"--- Renegotiation ---\n{reneg_raw}\n"
+
+    # --- TLS_FALLBACK_SCSV ---
+    fallback_raw = run_cmd(
+        f'echo | openssl s_client -fallback_scsv -tls1_2 -connect {domain}:443'
+        f' -servername {domain} 2>&1 | head -10',
+        timeout=10
+    )
+    results["cert"]["fallback_scsv"] = "alert inappropriate fallback" in fallback_raw.lower() or (
+        "CONNECTED" in fallback_raw and "error" not in fallback_raw.lower()
+    )
+
+    # --- Qualys-style scoring ---
+    # Protocol score (0-100)
+    proto_score = 0
+    protos = results["protocols"]
+    if protos.get("SSLv3"):
+        proto_score = 20
+        results["vulnerabilities"].append("SSLv3 habilitado (POODLE)")
+    elif protos.get("TLS 1.0") and not protos.get("TLS 1.2"):
+        proto_score = 40
+    elif protos.get("TLS 1.0"):
+        proto_score = 60
+    elif protos.get("TLS 1.1") and not protos.get("TLS 1.2"):
+        proto_score = 65
+    elif protos.get("TLS 1.1"):
+        proto_score = 70
+    elif protos.get("TLS 1.2") and protos.get("TLS 1.3"):
+        proto_score = 100
+    elif protos.get("TLS 1.2"):
+        proto_score = 95
+    elif protos.get("TLS 1.3"):
+        proto_score = 100
+
+    # Key exchange score (0-100) — ECC/EdDSA use smaller key sizes than RSA
+    kx_score = 0
+    if key_type in ("ECC", "EdDSA"):
+        if key_bits >= 384:
+            kx_score = 100
+        elif key_bits >= 256:
+            kx_score = 90
+        elif key_bits > 0:
+            kx_score = 40
+        else:
+            kx_score = 70
+    else:
+        if key_bits >= 4096:
+            kx_score = 100
+        elif key_bits >= 2048:
+            kx_score = 90
+        elif key_bits >= 1024:
+            kx_score = 40
+        elif key_bits > 0:
+            kx_score = 10
+            results["vulnerabilities"].append(f"Clave RSA débil ({key_bits} bits)")
+        else:
+            kx_score = 70
+
+    if "sha1" in sig_algo.lower() and "sha256" not in sig_algo.lower():
+        kx_score = min(kx_score, 50)
+        results["vulnerabilities"].append("Firma SHA-1 (obsoleta)")
+    if "md5" in sig_algo.lower():
+        kx_score = min(kx_score, 10)
+        results["vulnerabilities"].append("Firma MD5 (insegura)")
+
+    # Cipher strength score (0-100)
+    cipher_score = 90
+    if results["ciphers"]["weak"].get("NULL"):
+        cipher_score = 0
+        results["vulnerabilities"].append("Cifrado NULL aceptado")
+    elif results["ciphers"]["weak"].get("EXPORT"):
+        cipher_score = 10
+        results["vulnerabilities"].append("Cifrado EXPORT aceptado (FREAK)")
+    elif results["ciphers"]["weak"].get("DES"):
+        cipher_score = 20
+        results["vulnerabilities"].append("Cifrado DES aceptado")
+    elif results["ciphers"]["weak"].get("RC4"):
+        cipher_score = 30
+        results["vulnerabilities"].append("Cifrado RC4 aceptado")
+    elif results["ciphers"]["weak"].get("3DES"):
+        cipher_score = 50
+        results["vulnerabilities"].append("Cifrado 3DES aceptado (SWEET32)")
+
+    if "AES" in current_cipher and ("GCM" in current_cipher or "CHACHA" in current_cipher):
+        cipher_score = max(cipher_score, 95)
+    elif "AES" in current_cipher:
+        cipher_score = max(cipher_score, 80)
+
+    # Weighted total (Qualys formula)
+    total = round(proto_score * 0.3 + kx_score * 0.3 + cipher_score * 0.4)
+
+    # Grade caps (Qualys rules)
+    grade_cap = "A+"
+    if results["cert"].get("expired"):
+        grade_cap = "T"
+        total = min(total, 20)
+    if protos.get("SSLv3"):
+        grade_cap = "C"
+        total = min(total, 50)
+    if protos.get("TLS 1.0") or protos.get("TLS 1.1"):
+        if grade_cap not in ("T", "F", "C"):
+            grade_cap = "B"
+        total = min(total, 80)
+    weak_key = (key_type == "RSA" and 0 < key_bits < 1024) or (key_type in ("ECC", "EdDSA") and 0 < key_bits < 160)
+    if weak_key:
+        grade_cap = "F"
+        total = min(total, 20)
+    if results["ciphers"]["weak"].get("NULL") or results["ciphers"]["weak"].get("EXPORT"):
+        grade_cap = "F"
+        total = min(total, 20)
+    if results["ciphers"]["weak"].get("RC4"):
+        if grade_cap not in ("T", "F"):
+            grade_cap = "C"
+        total = min(total, 50)
+
+    # Assign grade from score
+    if grade_cap in ("T", "F"):
+        grade = grade_cap
+    elif total >= 90 and grade_cap == "A+":
+        grade = "A+" if results["cert"].get("ocsp_stapling") else "A"
+    elif total >= 80:
+        grade = min_grade("A", grade_cap)
+    elif total >= 65:
+        grade = min_grade("B", grade_cap)
+    elif total >= 50:
+        grade = min_grade("C", grade_cap)
+    elif total >= 35:
+        grade = "D"
+    else:
+        grade = "F"
+
+    results["tls_grade"] = grade
+    results["tls_score"] = total
+    results["tls_components"] = {
+        "protocol": proto_score,
+        "key_exchange": kx_score,
+        "cipher_strength": cipher_score,
+    }
+    results["score"] = max(1, round(total / 10))
+
+    results["raw"] += f"\n--- TLS Grade ---\n"
+    results["raw"] += f"Protocol: {proto_score}/100 | Key Exchange: {kx_score}/100 | Cipher: {cipher_score}/100\n"
+    results["raw"] += f"Total: {total}/100 | Grade: {grade}\n"
+    if results["vulnerabilities"]:
+        results["raw"] += f"Vulnerabilities: {', '.join(results['vulnerabilities'])}\n"
+
     return results
+
+
+def min_grade(a, b):
+    """Return the worse (lower) of two SSL grades."""
+    order = ["A+", "A", "B", "C", "D", "F", "T"]
+    return a if order.index(a) >= order.index(b) else b
 
 
 def check_dns(domain):
@@ -654,16 +900,118 @@ PHP_EOL_VERSIONS = {
     "7.3": "2021-12", "7.4": "2022-11", "8.0": "2023-11", "8.1": "2025-12",
 }
 
+NVD_CPE_MAP = {
+    "php": "cpe:2.3:a:php:php:{ver}:*:*:*:*:*:*:*",
+    "wordpress": "cpe:2.3:a:wordpress:wordpress:{ver}:*:*:*:*:*:*:*",
+    "apache": "cpe:2.3:a:apache:http_server:{ver}:*:*:*:*:*:*:*",
+    "nginx": "cpe:2.3:a:f5:nginx:{ver}:*:*:*:*:*:*:*",
+    "joomla": "cpe:2.3:a:joomla:joomla\\!:{ver}:*:*:*:*:*:*:*",
+    "drupal": "cpe:2.3:a:drupal:drupal:{ver}:*:*:*:*:*:*:*",
+}
+
+
+def _query_nvd(cpe_string, max_results=10):
+    """Query NVD API for CVEs matching a CPE via virtualMatchString."""
+    from urllib.parse import quote
+    url = (
+        f"https://services.nvd.nist.gov/rest/json/cves/2.0"
+        f"?virtualMatchString={quote(cpe_string)}"
+        f"&resultsPerPage={max_results}"
+    )
+    raw = run_cmd(f'curl -s -m 15 "{url}"', timeout=20)
+    if not raw or "[TIMEOUT]" in raw or "[ERROR" in raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+    cves = []
+    for item in data.get("vulnerabilities", []):
+        cve = item.get("cve", {})
+        cve_id = cve.get("id", "")
+        severity = 0.0
+        severity_label = ""
+        for m in cve.get("metrics", {}).get("cvssMetricV31", []):
+            d = m.get("cvssData", {})
+            severity = d.get("baseScore", 0.0)
+            severity_label = d.get("baseSeverity", "")
+        if not severity_label:
+            for m in cve.get("metrics", {}).get("cvssMetricV40", []):
+                d = m.get("cvssData", {})
+                severity = d.get("baseScore", 0.0)
+                severity_label = d.get("baseSeverity", "")
+        desc = ""
+        for d in cve.get("descriptions", []):
+            if d.get("lang") == "en":
+                desc = d["value"][:200]
+                break
+        if cve_id:
+            cves.append({
+                "id": cve_id,
+                "score": severity,
+                "severity": severity_label,
+                "description": desc,
+            })
+    total = data.get("totalResults", len(cves))
+    return {"total": total, "cves": sorted(cves, key=lambda x: x["score"], reverse=True)}
+
+
+def _lookup_cves(tech_data):
+    """Query NVD API for CVEs affecting detected technologies."""
+    import time
+    findings = []
+    queries = []
+
+    php_ver = ""
+    for pw in tech_data.get("powered_by", "").split(","):
+        m = re.search(r'PHP/(\d+\.\d+(?:\.\d+)?)', pw.strip(), re.I)
+        if m:
+            php_ver = m.group(1)
+    if php_ver:
+        queries.append(("PHP " + php_ver, NVD_CPE_MAP["php"].format(ver=php_ver)))
+
+    cms = tech_data.get("cms", "")
+    wp_match = re.search(r'WordPress\s+(\d+\.\d+(?:\.\d+)?)', cms)
+    if wp_match:
+        queries.append(("WordPress " + wp_match.group(1), NVD_CPE_MAP["wordpress"].format(ver=wp_match.group(1))))
+
+    server = tech_data.get("server", "")
+    apache_match = re.search(r'Apache/(\d+\.\d+\.\d+)', server)
+    if apache_match:
+        queries.append(("Apache " + apache_match.group(1), NVD_CPE_MAP["apache"].format(ver=apache_match.group(1))))
+    nginx_match = re.search(r'nginx/(\d+\.\d+\.\d+)', server)
+    if nginx_match:
+        queries.append(("nginx " + nginx_match.group(1), NVD_CPE_MAP["nginx"].format(ver=nginx_match.group(1))))
+
+    for software, cpe in queries:
+        result = _query_nvd(cpe, max_results=10)
+        if result and result.get("total", 0) > 0:
+            cves = result["cves"]
+            critical = sum(1 for c in cves if c["score"] >= 9.0)
+            high = sum(1 for c in cves if 7.0 <= c["score"] < 9.0)
+            findings.append({
+                "software": software,
+                "cves_total": result["total"],
+                "critical": critical,
+                "high": high,
+                "sample_cves": [(c["id"], c["score"], c["description"]) for c in cves[:5]],
+            })
+        time.sleep(0.8)
+
+    return findings
+
 
 def check_tech(domain):
-    """Detect technologies from HTTP response and headers."""
+    """Detect technologies, versions, plugins, and CVE risks."""
     results = {
         "cms": "", "frameworks": [], "raw": "",
         "server": "", "powered_by": "", "eol_software": [],
-        "version_disclosure": [], "score": 10,
+        "version_disclosure": [], "plugins": [], "cve_findings": [],
+        "score": 10,
     }
 
-    raw = run_cmd(f'curl -sL -m 10 https://{domain} | head -200')
+    raw = run_cmd(f'curl -sL -m 10 https://{domain}')
     results["raw"] = raw[:3000]
 
     hdr_raw = run_cmd(f'curl -sI -L -m 10 https://{domain}')
@@ -700,8 +1048,10 @@ def check_tech(domain):
     if generator_match:
         results["cms"] = generator_match.group(1)
 
-    if "wp-content" in raw or "wp-includes" in raw:
+    is_wp = "wp-content" in raw or "wp-includes" in raw
+    if is_wp:
         results["cms"] = results["cms"] or "WordPress"
+        _detect_wp_plugins(raw, results)
     elif "Joomla" in raw:
         results["cms"] = results["cms"] or "Joomla"
     elif "Drupal" in raw:
@@ -709,8 +1059,46 @@ def check_tech(domain):
     elif "Shopify" in raw:
         results["cms"] = results["cms"] or "Shopify"
 
-    results["score"] = max(0, results["score"])
+    results["cve_findings"] = _lookup_cves(results)
+    if results["cve_findings"]:
+        total_cves = sum(f["cves_total"] for f in results["cve_findings"])
+        total_critical = sum(f.get("critical", 0) for f in results["cve_findings"])
+        if total_critical >= 3:
+            results["score"] -= 4
+        elif total_critical >= 1:
+            results["score"] -= 2
+        elif total_cves >= 10:
+            results["score"] -= 1
+
+    results["score"] = max(2, results["score"])
     return results
+
+
+def _detect_wp_plugins(html, results):
+    """Extract WordPress plugin names and versions from page source."""
+    plugin_pattern = re.compile(
+        r'/wp-content/plugins/([a-zA-Z0-9_-]+)(?:/[^"\']*?(?:ver(?:sion)?=|v=)([0-9][0-9.]+))?',
+        re.I
+    )
+    seen = set()
+    for m in plugin_pattern.finditer(html):
+        slug = m.group(1)
+        ver = m.group(2) or ""
+        if slug not in seen:
+            seen.add(slug)
+            label = slug.replace("-", " ").title()
+            if ver:
+                label += f" {ver}"
+            results["plugins"].append(label)
+            results["version_disclosure"].append(f"Plugin: {slug}" + (f" v{ver}" if ver else ""))
+
+    theme_pattern = re.compile(r'/wp-content/themes/([a-zA-Z0-9_-]+)', re.I)
+    themes_seen = set()
+    for m in theme_pattern.finditer(html):
+        t = m.group(1)
+        if t not in themes_seen:
+            themes_seen.add(t)
+            results["version_disclosure"].append(f"Theme: {t}")
 
 
 def check_compliance(domain):
@@ -887,6 +1275,11 @@ def run_recon(domain, output_dir, company="", sector=""):
         (evidence_dir / "tech.json").write_text(
             json.dumps(tech_evidence, indent=2, default=str)
         )
+    if "tls" in results:
+        tls_evidence = {k: v for k, v in results["tls"].items() if k != "raw"}
+        (evidence_dir / "tls.json").write_text(
+            json.dumps(tls_evidence, indent=2, default=str)
+        )
     if "emails" in results:
         (evidence_dir / "emails.json").write_text(
             json.dumps(results["emails"], indent=2, default=str)
@@ -941,7 +1334,22 @@ def run_recon(domain, output_dir, company="", sector=""):
     if eol_names:
         tech_detail += f", EOL: {', '.join(eol_names)}"
     if tech.get("version_disclosure"):
-        tech_detail += f", disclosed: {'; '.join(tech['version_disclosure'])}"
+        tech_detail += f", disclosed: {'; '.join(tech['version_disclosure'][:5])}"
+    cve_findings = tech.get("cve_findings", [])
+    if cve_findings:
+        cve_parts = []
+        for cf in cve_findings:
+            cve_parts.append(f"{cf['software']}: {cf['cves_total']} CVEs ({cf.get('critical',0)} críticos)")
+        tech_detail += f", CVEs: {'; '.join(cve_parts)}"
+
+    tls = results.get("tls", {})
+    tls_comps = tls.get("tls_components", {})
+    tls_detail = f"Grade: {tls.get('tls_grade', '?')}, Score: {tls.get('tls_score', '?')}/100"
+    tls_detail += f" (Proto: {tls_comps.get('protocol', '?')}, KX: {tls_comps.get('key_exchange', '?')}, Cipher: {tls_comps.get('cipher_strength', '?')})"
+    if tls.get("legacy_tls"):
+        tls_detail += f", Legacy: {', '.join(tls['legacy_tls'])}"
+    if tls.get("vulnerabilities"):
+        tls_detail += f", Vulns: {', '.join(tls['vulnerabilities'])}"
 
     comp = results.get("compliance", {})
     comp_checks = comp.get("checks", {})
@@ -958,6 +1366,7 @@ def run_recon(domain, output_dir, company="", sector=""):
         "details": {
             "breach": breach_detail,
             "tech": tech_detail,
+            "tls": tls_detail,
             "compliance": comp_detail,
         },
     }
