@@ -516,12 +516,17 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
             missing_html = "<ul>" + "".join(f"<li>{m}</li>" for m in missing_items) + "</ul>"
         findings_html += f"""
         <div class="finding-card">
-          <h3><span class="badge sev-{sev}">{sev_label}</span> &nbsp;Carencias en cumplimiento normativo (RGPD/LSSI-CE)</h3>
-          <p>La web no cumple con todos los requisitos legales obligatorios para empresas en Espa&ntilde;a.</p>
+          <h3><span class="badge sev-{sev}">{sev_label}</span> &nbsp;Elementos de cumplimiento normativo no verificados</h3>
+          <p>No hemos podido verificar la presencia de los siguientes elementos
+          obligatorios en la web. Esto no significa necesariamente que no existan,
+          pero s&iacute; que no son f&aacute;cilmente localizables para un visitante
+          o para los organismos reguladores:</p>
           {missing_html}
-          <p><span class="risk-label">Riesgo:</span> La AEPD puede imponer multas de hasta 20 millones de euros
-          o el 4% de la facturaci&oacute;n anual por incumplimiento del RGPD. La LSSI-CE exige aviso legal
-          con datos de la empresa en toda web con actividad econ&oacute;mica.</p>
+          <p><span class="risk-label">Recomendaci&oacute;n:</span> Conviene asegurar que estos
+          elementos est&eacute;n visibles y accesibles desde cualquier p&aacute;gina del sitio.
+          La normativa espa&ntilde;ola (RGPD y LSSI-CE) exige que las webs con actividad
+          econ&oacute;mica muestren aviso legal, pol&iacute;tica de privacidad y mecanismo
+          de consentimiento de cookies.</p>
         </div>"""
 
     # Headers finding — last, lowest priority (defense-in-depth)
@@ -583,13 +588,13 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
     if cs < 8:
         comp_missing = [k for k, v in comp_checks.items() if "No" in v]
         if "cookie_banner" in comp_missing and "privacy_policy" in comp_missing:
-            recs_high.append("Implementar banner de cookies con consentimiento expl&iacute;cito y pol&iacute;tica de privacidad")
+            recs_high.append("Verificar que el banner de cookies y la pol&iacute;tica de privacidad sean visibles y accesibles")
         elif "cookie_banner" in comp_missing:
-            recs_high.append("Implementar banner de cookies con consentimiento expl&iacute;cito conforme al RGPD")
+            recs_high.append("Verificar que el mecanismo de consentimiento de cookies sea visible para los visitantes")
         elif "privacy_policy" in comp_missing:
-            recs_high.append("Publicar pol&iacute;tica de privacidad accesible desde todas las p&aacute;ginas")
+            recs_high.append("Verificar que la pol&iacute;tica de privacidad sea accesible desde todas las p&aacute;ginas")
         if "legal_notice" in comp_missing:
-            recs_high.append("Publicar aviso legal con datos fiscales conforme a la LSSI-CE")
+            recs_high.append("Verificar que el aviso legal sea f&aacute;cilmente localizable en la web")
         if "security_txt" in comp_missing:
             recs_medium.append("Crear archivo <code>security.txt</code> con contacto para reportes de vulnerabilidades (est&aacute;ndar RFC 9116)")
 

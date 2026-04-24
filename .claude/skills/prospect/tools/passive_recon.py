@@ -1249,61 +1249,103 @@ def _extract_prestashop_components(html, results):
             results["version_disclosure"].append(f"Module: {mod}")
 
 
+def _render_page(domain, timeout_ms=12000):
+    """Load page with Playwright to get JS-rendered DOM. Returns (html, ok)."""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            ctx = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                ignore_https_errors=True,
+            )
+            page = ctx.new_page()
+            resp = page.goto(f"https://{domain}", wait_until="networkidle", timeout=timeout_ms)
+            status = resp.status if resp else 0
+            html = page.content()
+            browser.close()
+            if status in (403, 401, 503) or len(html) < 2000:
+                return html, False
+            return html, True
+    except Exception:
+        return "", False
+
+
 def check_compliance(domain):
-    """Check GDPR/LSSI-CE compliance signals from public pages."""
+    """Check GDPR/LSSI-CE compliance signals using headless browser + curl, merged."""
     results = {
         "raw": "", "score": 10, "checks": {},
         "cookie_banner": False, "privacy_policy": False,
         "legal_notice": False, "security_txt": False, "robots_txt": False,
     }
 
-    home = run_cmd(f'curl -sL -m 10 https://{domain}')
-    results["raw"] += f"--- homepage ({len(home)} bytes) ---\n"
+    curl_html = run_cmd(f'curl -sL -m 10 https://{domain}')
+    rendered, render_ok = _render_page(domain)
 
-    cookie_keywords = ["cookie", "galleta", "consentimiento", "consent", "cookiebot",
-                       "cookie-banner", "cookie-notice", "gdpr", "rgpd", "onetrust",
-                       "cookie-law", "tarteaucitron", "klaro", "cc-window"]
+    sources = []
+    if render_ok and rendered:
+        sources.append(("rendered", rendered))
+        results["raw"] += f"--- rendered DOM ({len(rendered)} bytes) ---\n"
+    if curl_html:
+        sources.append(("curl", curl_html))
+        results["raw"] += f"--- curl ({len(curl_html)} bytes) ---\n"
+
+    home = "\n".join(html for _, html in sources)
     home_lower = home.lower()
+
+    cookie_keywords = [
+        "cookie", "galleta", "consentimiento", "consent", "cookiebot",
+        "cookie-banner", "cookie-notice", "gdpr", "rgpd", "onetrust",
+        "cookie-law", "tarteaucitron", "klaro", "cc-window", "cc-banner",
+        "cookies-eu", "cookie-consent", "cookieconsent", "iubenda",
+        "quantcast", "termly", "complianz", "moove_gdpr", "cmplz",
+    ]
     results["cookie_banner"] = any(kw in home_lower for kw in cookie_keywords)
-    results["checks"]["cookie_banner"] = "Detectado" if results["cookie_banner"] else "No detectado"
+    results["checks"]["cookie_banner"] = "Detectado" if results["cookie_banner"] else "No verificado"
     if not results["cookie_banner"]:
         results["score"] -= 3
 
-    privacy_paths = ["/politica-privacidad", "/privacy-policy", "/privacidad",
-                     "/politica-de-privacidad", "/privacy"]
-    pp_found = False
-    for path in privacy_paths:
-        r = run_cmd(f'curl -sI -L -m 5 https://{domain}{path} 2>/dev/null')
-        if "200" in r.split("\n")[0] if r else "":
-            pp_found = True
-            results["raw"] += f"Privacy policy found at {path}\n"
-            break
+    all_hrefs = re.findall(r'href="([^"]*)"', home, re.I)
+    all_hrefs_lower = [h.lower() for h in all_hrefs]
+
+    privacy_href_kw = ["privac", "proteccion-de-datos", "datos-personales"]
+    pp_found = any(any(kw in h for kw in privacy_href_kw) for h in all_hrefs_lower)
+    if pp_found:
+        match = next(h for h in all_hrefs if any(kw in h.lower() for kw in privacy_href_kw))
+        results["raw"] += f"Privacy link found: {match}\n"
     if not pp_found:
-        pp_links = re.findall(r'href="([^"]*(?:privac|privacy)[^"]*)"', home, re.I)
-        if pp_links:
-            pp_found = True
-            results["raw"] += f"Privacy link in page: {pp_links[0]}\n"
+        privacy_paths = ["/politica-privacidad", "/privacy-policy", "/privacidad",
+                         "/politica-de-privacidad", "/privacy", "/politica-de-cookies",
+                         "/cookies", "/proteccion-de-datos"]
+        for path in privacy_paths:
+            r = run_cmd(f'curl -sI -L -m 5 https://{domain}{path} 2>/dev/null')
+            if "200" in r.split("\n")[0] if r else "":
+                pp_found = True
+                results["raw"] += f"Privacy policy found at {path}\n"
+                break
     results["privacy_policy"] = pp_found
-    results["checks"]["privacy_policy"] = "Presente" if pp_found else "No encontrada"
+    results["checks"]["privacy_policy"] = "Presente" if pp_found else "No verificada"
     if not pp_found:
         results["score"] -= 3
 
-    legal_paths = ["/aviso-legal", "/legal", "/aviso-legal-y-condiciones",
-                   "/terminos", "/terms", "/condiciones-de-uso"]
-    legal_found = False
-    for path in legal_paths:
-        r = run_cmd(f'curl -sI -L -m 5 https://{domain}{path} 2>/dev/null')
-        if "200" in r.split("\n")[0] if r else "":
-            legal_found = True
-            results["raw"] += f"Legal notice found at {path}\n"
-            break
+    legal_href_kw = ["aviso-legal", "aviso_legal", "legal-notice", "/legal", "/terminos",
+                     "/terms", "/condiciones", "nota-legal", "informacion-legal"]
+    legal_found = any(any(kw in h for kw in legal_href_kw) for h in all_hrefs_lower)
+    if legal_found:
+        match = next(h for h in all_hrefs if any(kw in h.lower() for kw in legal_href_kw))
+        results["raw"] += f"Legal link found: {match}\n"
     if not legal_found:
-        legal_links = re.findall(r'href="([^"]*(?:legal|aviso|terms|condiciones)[^"]*)"', home, re.I)
-        if legal_links:
-            legal_found = True
-            results["raw"] += f"Legal link in page: {legal_links[0]}\n"
+        legal_paths = ["/aviso-legal", "/legal", "/aviso-legal-y-condiciones",
+                       "/terminos", "/terms", "/condiciones-de-uso", "/nota-legal",
+                       "/informacion-legal", "/terminos-y-condiciones"]
+        for path in legal_paths:
+            r = run_cmd(f'curl -sI -L -m 5 https://{domain}{path} 2>/dev/null')
+            if "200" in r.split("\n")[0] if r else "":
+                legal_found = True
+                results["raw"] += f"Legal notice found at {path}\n"
+                break
     results["legal_notice"] = legal_found
-    results["checks"]["legal_notice"] = "Presente" if legal_found else "No encontrado"
+    results["checks"]["legal_notice"] = "Presente" if legal_found else "No verificado"
     if not legal_found:
         results["score"] -= 2
 
