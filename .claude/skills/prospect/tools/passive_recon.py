@@ -907,6 +907,9 @@ NVD_CPE_MAP = {
     "nginx": "cpe:2.3:a:f5:nginx:{ver}:*:*:*:*:*:*:*",
     "joomla": "cpe:2.3:a:joomla:joomla\\!:{ver}:*:*:*:*:*:*:*",
     "drupal": "cpe:2.3:a:drupal:drupal:{ver}:*:*:*:*:*:*:*",
+    "prestashop": "cpe:2.3:a:prestashop:prestashop:{ver}:*:*:*:*:*:*:*",
+    "magento": "cpe:2.3:a:magento:magento:{ver}:*:*:*:*:*:*:*",
+    "typo3": "cpe:2.3:a:typo3:typo3:{ver}:*:*:*:*:*:*:*",
 }
 
 
@@ -972,9 +975,19 @@ def _lookup_cves(tech_data):
         queries.append(("PHP " + php_ver, NVD_CPE_MAP["php"].format(ver=php_ver)))
 
     cms = tech_data.get("cms", "")
-    wp_match = re.search(r'WordPress\s+(\d+\.\d+(?:\.\d+)?)', cms)
-    if wp_match:
-        queries.append(("WordPress " + wp_match.group(1), NVD_CPE_MAP["wordpress"].format(ver=wp_match.group(1))))
+    cms_patterns = [
+        (r'WordPress\s+(\d+\.\d+(?:\.\d+)?)', "WordPress", "wordpress"),
+        (r'Joomla\s+(\d+\.\d+(?:\.\d+)?)', "Joomla", "joomla"),
+        (r'Drupal\s+(\d+\.\d+(?:\.\d+)?)', "Drupal", "drupal"),
+        (r'PrestaShop\s+(\d+\.\d+(?:\.\d+)?)', "PrestaShop", "prestashop"),
+        (r'Magento\s+(\d+\.\d+(?:\.\d+)?)', "Magento", "magento"),
+        (r'TYPO3\s+(\d+\.\d+(?:\.\d+)?)', "TYPO3", "typo3"),
+    ]
+    for pattern, label, cpe_key in cms_patterns:
+        m = re.search(pattern, cms, re.I)
+        if m and cpe_key in NVD_CPE_MAP:
+            queries.append((f"{label} {m.group(1)}", NVD_CPE_MAP[cpe_key].format(ver=m.group(1))))
+            break
 
     server = tech_data.get("server", "")
     apache_match = re.search(r'Apache/(\d+\.\d+\.\d+)', server)
@@ -1044,20 +1057,7 @@ def check_tech(domain):
                     results["score"] -= 5
                     break
 
-    generator_match = re.search(r'<meta[^>]*name=["\']generator["\'][^>]*content=["\']([^"\']+)', raw, re.I)
-    if generator_match:
-        results["cms"] = generator_match.group(1)
-
-    is_wp = "wp-content" in raw or "wp-includes" in raw
-    if is_wp:
-        results["cms"] = results["cms"] or "WordPress"
-        _detect_wp_plugins(raw, results)
-    elif "Joomla" in raw:
-        results["cms"] = results["cms"] or "Joomla"
-    elif "Drupal" in raw:
-        results["cms"] = results["cms"] or "Drupal"
-    elif "Shopify" in raw:
-        results["cms"] = results["cms"] or "Shopify"
+    _detect_cms(raw, hdr_raw, results)
 
     results["cve_findings"] = _lookup_cves(results)
     if results["cve_findings"]:
@@ -1074,14 +1074,115 @@ def check_tech(domain):
     return results
 
 
-def _detect_wp_plugins(html, results):
-    """Extract WordPress plugin names and versions from page source."""
-    plugin_pattern = re.compile(
-        r'/wp-content/plugins/([a-zA-Z0-9_-]+)(?:/[^"\']*?(?:ver(?:sion)?=|v=)([0-9][0-9.]+))?',
-        re.I
-    )
+def _detect_cms(html, headers, results):
+    """Detect CMS platform and extract plugins/modules/themes."""
+    gen_match = re.search(r'<meta[^>]*name=["\']generator["\'][^>]*content=["\']([^"\']+)', html, re.I)
+    generator = gen_match.group(1) if gen_match else ""
+
+    # --- WordPress ---
+    if "wp-content" in html or "wp-includes" in html:
+        wp_ver = ""
+        m = re.search(r'WordPress\s+(\d+\.\d+(?:\.\d+)?)', generator)
+        if m:
+            wp_ver = m.group(1)
+        if not wp_ver:
+            m = re.search(r'/wp-(?:includes/js/(?:wp-util|wp-embed|wp-emoji-release)|includes/css/dist/block-library/style)[^"\']*\?ver=(\d+\.\d+(?:\.\d+)?)', html)
+            if m:
+                wp_ver = m.group(1)
+        results["cms"] = f"WordPress {wp_ver}" if wp_ver else "WordPress"
+        _extract_wp_components(html, results)
+        return
+
+    # --- Joomla ---
+    if "/media/com_" in html or "/components/com_" in html or "/media/system/js" in html:
+        joomla_ver = ""
+        m = re.search(r'Joomla!\s*([\d.]+)', generator)
+        if m:
+            joomla_ver = m.group(1)
+        results["cms"] = f"Joomla {joomla_ver}" if joomla_ver else "Joomla"
+        _extract_joomla_components(html, results)
+        return
+
+    # --- Drupal ---
+    if "/sites/default/files" in html or "Drupal.settings" in html or "/misc/drupal" in html:
+        drupal_ver = ""
+        m = re.search(r'Drupal\s*([\d.]+)', generator)
+        if m:
+            drupal_ver = m.group(1)
+        results["cms"] = f"Drupal {drupal_ver}" if drupal_ver else "Drupal"
+        _extract_drupal_components(html, results)
+        return
+
+    # --- PrestaShop ---
+    if "/modules/ps_" in html or "prestashop" in html.lower()[:5000] or "var prestashop" in html.lower():
+        ps_ver = ""
+        m = re.search(r'PrestaShop\s*([\d.]+)', generator)
+        if m:
+            ps_ver = m.group(1)
+        results["cms"] = f"PrestaShop {ps_ver}" if ps_ver else "PrestaShop"
+        _extract_prestashop_components(html, results)
+        return
+
+    # --- Magento ---
+    if "/static/version" in html or "Mage.Cookies" in html or "mage/cookies" in html.lower():
+        results["cms"] = "Magento"
+        seen = set()
+        for m in re.finditer(r'/static/(?:version\d+/)?frontend/([^/]+)/([^/]+)', html):
+            theme = f"{m.group(1)}/{m.group(2)}"
+            if theme not in seen:
+                seen.add(theme)
+                results["version_disclosure"].append(f"Theme: {theme}")
+        return
+
+    # --- Shopify ---
+    if "cdn.shopify.com" in html or "Shopify.theme" in html:
+        results["cms"] = "Shopify"
+        m = re.search(r'Shopify\.theme\s*=\s*\{[^}]*"name"\s*:\s*"([^"]+)"', html)
+        if m:
+            results["version_disclosure"].append(f"Theme: {m.group(1)}")
+        return
+
+    # --- Wix ---
+    if "static.wixstatic.com" in html or "wix-code-sdk" in html:
+        results["cms"] = "Wix"
+        return
+
+    # --- Squarespace ---
+    if "squarespace.com" in html and ("Static.SQUARESPACE" in html or "sqs-" in html):
+        results["cms"] = "Squarespace"
+        return
+
+    # --- Webflow ---
+    if "assets.website-files.com" in html or "webflow" in html.lower()[:3000]:
+        wf = re.search(r'data-wf-site="([^"]+)"', html)
+        if wf or "Webflow" in generator:
+            results["cms"] = "Webflow"
+            return
+
+    # --- TYPO3 ---
+    if "/typo3conf/" in html or "/typo3temp/" in html:
+        results["cms"] = "TYPO3"
+        seen = set()
+        for m in re.finditer(r'/typo3conf/ext/([a-zA-Z0-9_-]+)', html):
+            ext = m.group(1)
+            if ext not in seen:
+                seen.add(ext)
+                results["plugins"].append(ext.replace("_", " ").title())
+                results["version_disclosure"].append(f"Extension: {ext}")
+        return
+
+    # --- Fallback: use generator tag ---
+    if generator:
+        clean = generator.split(";")[0].strip()
+        results["cms"] = clean
+
+
+def _extract_wp_components(html, results):
+    """Extract WordPress plugins and themes."""
     seen = set()
-    for m in plugin_pattern.finditer(html):
+    for m in re.finditer(
+        r'/wp-content/plugins/([a-zA-Z0-9_-]+)(?:/[^"\']*?(?:ver(?:sion)?=|v=)([0-9][0-9.]+))?', html, re.I
+    ):
         slug = m.group(1)
         ver = m.group(2) or ""
         if slug not in seen:
@@ -1091,14 +1192,61 @@ def _detect_wp_plugins(html, results):
                 label += f" {ver}"
             results["plugins"].append(label)
             results["version_disclosure"].append(f"Plugin: {slug}" + (f" v{ver}" if ver else ""))
-
-    theme_pattern = re.compile(r'/wp-content/themes/([a-zA-Z0-9_-]+)', re.I)
     themes_seen = set()
-    for m in theme_pattern.finditer(html):
+    for m in re.finditer(r'/wp-content/themes/([a-zA-Z0-9_-]+)', html, re.I):
         t = m.group(1)
         if t not in themes_seen:
             themes_seen.add(t)
             results["version_disclosure"].append(f"Theme: {t}")
+
+
+def _extract_joomla_components(html, results):
+    """Extract Joomla components, modules and templates."""
+    seen = set()
+    for m in re.finditer(r'/components/(com_[a-zA-Z0-9_]+)', html):
+        comp = m.group(1)
+        if comp not in seen:
+            seen.add(comp)
+            results["plugins"].append(comp.replace("com_", "").replace("_", " ").title())
+            results["version_disclosure"].append(f"Component: {comp}")
+    for m in re.finditer(r'/modules/(mod_[a-zA-Z0-9_]+)', html):
+        mod = m.group(1)
+        if mod not in seen:
+            seen.add(mod)
+            results["plugins"].append(mod.replace("mod_", "").replace("_", " ").title())
+            results["version_disclosure"].append(f"Module: {mod}")
+    for m in re.finditer(r'/templates/([a-zA-Z0-9_-]+)', html):
+        t = m.group(1)
+        if t not in ("system",) and t not in seen:
+            seen.add(t)
+            results["version_disclosure"].append(f"Template: {t}")
+
+
+def _extract_drupal_components(html, results):
+    """Extract Drupal modules and themes."""
+    seen = set()
+    for m in re.finditer(r'/modules/(?:contrib/)?([a-zA-Z0-9_-]+)', html):
+        mod = m.group(1)
+        if mod not in ("system", "node", "user", "field") and mod not in seen:
+            seen.add(mod)
+            results["plugins"].append(mod.replace("_", " ").replace("-", " ").title())
+            results["version_disclosure"].append(f"Module: {mod}")
+    for m in re.finditer(r'/themes/(?:contrib/)?([a-zA-Z0-9_-]+)', html):
+        t = m.group(1)
+        if t not in seen:
+            seen.add(t)
+            results["version_disclosure"].append(f"Theme: {t}")
+
+
+def _extract_prestashop_components(html, results):
+    """Extract PrestaShop modules."""
+    seen = set()
+    for m in re.finditer(r'/modules/([a-zA-Z0-9_-]+)', html):
+        mod = m.group(1)
+        if mod not in seen:
+            seen.add(mod)
+            results["plugins"].append(mod.replace("_", " ").replace("-", " ").title())
+            results["version_disclosure"].append(f"Module: {mod}")
 
 
 def check_compliance(domain):
