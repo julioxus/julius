@@ -324,14 +324,25 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
             total_all = sum(cf.get("cves_total", 0) for cf in cve_findings)
             total_crit = sum(cf.get("critical", 0) for cf in cve_findings)
             total_high = sum(cf.get("high", 0) for cf in cve_findings)
-            sw_names = ", ".join(escape(cf.get("software", "")) for cf in cve_findings)
             severity_word = "cr&iacute;tica" if total_crit > 0 else "alta" if total_high > 0 else "moderada"
             severity_color = "#dc2626" if total_crit > 0 else "#ea580c" if total_high > 0 else "#f59e0b"
+            component_lines = ""
+            for cf in cve_findings:
+                sw = escape(cf.get("software", ""))
+                n = cf.get("cves_total", 0)
+                nc = cf.get("critical", 0)
+                nh = cf.get("high", 0)
+                sev_tag = ""
+                if nc > 0:
+                    sev_tag = f" &mdash; <span style='color:#dc2626;font-weight:bold'>{nc} de gravedad cr&iacute;tica</span>"
+                elif nh > 0:
+                    sev_tag = f" &mdash; <span style='color:#ea580c;font-weight:bold'>{nh} de gravedad alta</span>"
+                component_lines += f"<li><strong>{sw}</strong>: {n} fallos conocidos{sev_tag}</li>"
             cve_html = f"""<div style="margin:8px 0;padding:8px 12px;background:#fef2f2;border-left:3px solid {severity_color};font-size:9.5pt">
               <strong>&#9888; Se han detectado {total_all} fallos de seguridad documentados</strong>
-              en el software del servidor ({sw_names}), de los cuales
-              <strong style="color:{severity_color}">{total_crit + total_high} son de gravedad {severity_word}</strong>.
-              <p style="margin:6px 0 0">Estos fallos est&aacute;n catalogados en la base de datos
+              en los siguientes componentes del servidor:
+              <ul style="margin:6px 0 4px;padding-left:20px">{component_lines}</ul>
+              <p style="margin:4px 0 0">Estos fallos est&aacute;n catalogados en la base de datos
               p&uacute;blica de vulnerabilidades del gobierno de EE.UU. (NIST) y son conocidos por
               atacantes de todo el mundo. Mientras el software no se actualice, un atacante podr&iacute;a
               aprovechar estas debilidades para acceder al servidor, robar datos de clientes o
