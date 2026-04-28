@@ -309,7 +309,6 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
         for lk in leakix_data.get("leaks", []):
             lix_plugins_in_data.add(lk.get("plugin", ""))
     _plugin_to_sp = {
-        "GitConfigHttpPlugin": "git_exposed",
         "DotEnvConfigPlugin": "env_file",
         "DotDsStoreOpenPlugin": "ds_store",
         "PhpInfoHttpPlugin": "phpinfo",
@@ -327,8 +326,14 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
         sp_sev, sp_label = sev_map.get(spf.get("severity", "media"), ("medium", "Media"))
         sp_border = border_map.get(spf.get("severity", "media"), "#eab308")
 
-        if cat == "git_exposed" and sp_git_data:
+        if cat == "git_exposed":
+            justification = spf.get("justification", "")
             sp_body = f'<p>El directorio <code>.git</code> del repositorio de c&oacute;digo fuente es accesible p&uacute;blicamente en: <code>{escape(spf.get("url", ""))}</code></p>'
+            if justification:
+                jcolor = "#dc2626" if spf.get("severity") == "alta" else "#d97706"
+                sp_body += f'<p style="color:{jcolor};font-style:italic;margin:6px 0 10px 0">{escape(justification)}</p>'
+            if not sp_git_data:
+                sp_git_data = spf.get("git_data", {})
             head_ref = sp_git_data.get("head_ref", "")
             if head_ref:
                 sp_body += f'<p><strong>HEAD:</strong> <code>{escape(head_ref)}</code></p>'
@@ -620,8 +625,11 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
         sev, sev_label = _sev(lix_score)
         sev_items = ", ".join(f"<strong>{v}</strong> de severidad {escape(k)}" for k, v in lix_sev.items())
         sev_colors = {"critical": "#dc2626", "high": "#ea580c", "medium": "#f59e0b", "low": "#3b82f6", "info": "#94a3b8"}
+        sp_has_git = any(f.get("category") == "git_exposed" for f in sp_findings)
         plugin_rows = ""
         for pd in lix_plugin_details[:12]:
+            if pd.get("plugin") == "GitConfigHttpPlugin" and sp_has_git:
+                continue
             sc = sev_colors.get(pd.get("severity", "info"), "#94a3b8")
             hv = " &#9888;" if pd.get("high_value") else ""
             plugin_rows += (

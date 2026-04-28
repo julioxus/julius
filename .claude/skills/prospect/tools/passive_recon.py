@@ -1170,7 +1170,8 @@ def _check_git_exposed(base_url, domain):
             "path": "/.git/HEAD",
             "url": f"{base}/.git/",
             "title": "Repositorio Git (.git) expuesto públicamente",
-            "severity": "critica",
+            "severity": "alta",
+            "justification": "Se ha verificado el acceso directo al archivo .git/HEAD, confirmando que el contenido del repositorio es descargable. Un atacante puede reconstruir el código fuente completo.",
             "risk": "La exposición del directorio .git permite a cualquier atacante descargar el código fuente completo de la aplicación, incluyendo posibles credenciales, claves API, configuraciones internas y lógica de negocio.",
             "size": 0,
             "content_type": "",
@@ -2266,6 +2267,67 @@ def run_recon(domain, output_dir, company="", sector=""):
                     results["breach"]["score"] = 1
         results["breach"]["linkedin_confirmed"] = linkedin_confirmed
         results["breach"]["people_checked"] = len(candidate_pool)
+
+    # Reconcile LeakIX GitConfigHttpPlugin with sensitive_paths git check
+    lix_plugins = set()
+    lix_data = results.get("leakix", {})
+    for lk in lix_data.get("leaks", []):
+        lix_plugins.add(lk.get("plugin", ""))
+    sp_data = results.get("sensitive_paths", {})
+    sp_cats = {f.get("category") for f in sp_data.get("findings", [])}
+    if "GitConfigHttpPlugin" in lix_plugins and "git_exposed" not in sp_cats:
+        git_reconciled = False
+        for scheme in ["https", "http"]:
+            head_raw = run_cmd(
+                f'curl -sk -o /dev/null -w "%{{http_code}}" '
+                f'-H "User-Agent: Mozilla/5.0" "{scheme}://{domain}/.git/HEAD" -m 10'
+            )
+            head_body = ""
+            if head_raw.strip() == "200":
+                head_body = run_cmd(
+                    f'curl -sk -H "User-Agent: Mozilla/5.0" "{scheme}://{domain}/.git/HEAD" -m 10'
+                ).strip()
+            head_ok = head_body.startswith("ref:") or re.match(r'^[0-9a-f]{40}$', head_body or "")
+            if head_ok:
+                sp_data.setdefault("findings", []).append({
+                    "category": "git_exposed",
+                    "path": "/.git/HEAD",
+                    "url": f"{scheme}://{domain}/.git/",
+                    "title": "Repositorio Git (.git) expuesto públicamente",
+                    "severity": "alta",
+                    "justification": "Se ha verificado el acceso directo al archivo .git/HEAD, confirmando que el contenido del repositorio es descargable. Un atacante puede reconstruir el código fuente completo.",
+                    "risk": "La exposición del directorio .git permite a cualquier atacante descargar el código fuente completo de la aplicación.",
+                    "size": 0, "content_type": "", "extracted": [],
+                    "git_data": {"exposed": True, "head_ref": head_body, "base_url": f"{scheme}://{domain}"},
+                })
+                git_reconciled = True
+                break
+            elif head_raw.strip() and head_raw.strip() != "000":
+                sp_data.setdefault("findings", []).append({
+                    "category": "git_exposed",
+                    "path": "/.git/HEAD",
+                    "url": f"{scheme}://{domain}/.git/",
+                    "title": "Directorio .git detectado (acceso parcial)",
+                    "severity": "media",
+                    "justification": "Motores de búsqueda de seguridad han indexado el directorio .git, pero no se ha podido verificar el acceso al archivo HEAD. El repositorio podría estar parcialmente protegido o haber sido remediado recientemente.",
+                    "risk": "La presencia del directorio .git indica que existe o existió un repositorio de código accesible. Aunque el acceso directo no se ha confirmado, la información indexada puede seguir disponible en cachés de terceros.",
+                    "size": 0, "content_type": "", "extracted": [],
+                    "git_data": {"exposed": False, "base_url": f"{scheme}://{domain}"},
+                })
+                git_reconciled = True
+                break
+        if not git_reconciled:
+            sp_data.setdefault("findings", []).append({
+                "category": "git_exposed",
+                "path": "/.git/",
+                "url": f"https://{domain}/.git/",
+                "title": "Directorio .git indexado por motores de seguridad",
+                "severity": "media",
+                "justification": "Motores de búsqueda de seguridad (LeakIX) han confirmado la exposición del directorio .git en este dominio. No se ha podido verificar el acceso directo en este momento (servidor no disponible o conexión rechazada), pero la información indexada puede seguir disponible en cachés de terceros.",
+                "risk": "La presencia del directorio .git indica que existe o existió un repositorio de código accesible públicamente, exponiendo potencialmente código fuente, credenciales y lógica de negocio.",
+                "size": 0, "content_type": "", "extracted": [],
+                "git_data": {"exposed": False, "base_url": f"https://{domain}"},
+            })
 
     nuclei_data = results.pop("nuclei", {})
     if "tech" in results:
