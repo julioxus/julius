@@ -45,6 +45,7 @@ AREA_LABELS = {
     "tls": "SSL/TLS",
     "dns": "Email (SPF/DMARC)",
     "exposure": "Superficie Expuesta",
+    "leakix": "Exposiciones (LeakIX)",
     "breach": "Filtraciones",
     "compliance": "Cumplimiento Legal",
     "misconfig": "Archivos Sensibles",
@@ -56,6 +57,7 @@ AREA_ICONS = {
     "tls": "&#128274;",
     "dns": "&#9993;",
     "exposure": "&#127760;",
+    "leakix": "&#128065;",
     "breach": "&#128681;",
     "compliance": "&#9878;",
     "misconfig": "&#128270;",
@@ -267,6 +269,7 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
     compliance_data = load_evidence_json(evidence_dir, "compliance.json")
     subdomain_data = load_evidence_json(evidence_dir, "subdomains.json")
     shodan_data = load_evidence_json(evidence_dir, "shodan.json")
+    leakix_data = load_evidence_json(evidence_dir, "leakix.json")
     sensitive_paths_data = load_evidence_json(evidence_dir, "sensitive_paths.json")
 
     # Classify findings by severity using consistent thresholds
@@ -278,6 +281,8 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
     # Build score cards
     score_cards_html = ""
     for key, label in AREA_LABELS.items():
+        if key not in scores:
+            continue
         s = scores.get(key, 5)
         color = score_color(s)
         pct = s * 10
@@ -298,12 +303,29 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
     # Sensitive paths findings (including git exposure) — each gets its own card
     sp_findings = sensitive_paths_data.get("findings", []) if isinstance(sensitive_paths_data, dict) else []
     sp_git_data = sensitive_paths_data.get("git_exposed", {}) if isinstance(sensitive_paths_data, dict) else {}
+
+    lix_plugins_in_data = set()
+    if isinstance(leakix_data, dict):
+        for lk in leakix_data.get("leaks", []):
+            lix_plugins_in_data.add(lk.get("plugin", ""))
+    _plugin_to_sp = {
+        "GitConfigHttpPlugin": "git_exposed",
+        "DotEnvConfigPlugin": "env_file",
+        "DotDsStoreOpenPlugin": "ds_store",
+        "PhpInfoHttpPlugin": "phpinfo",
+        "ApacheStatusPlugin": "server_status",
+        "WpUserEnumHttp": "wp_user_enum",
+    }
+    sp_cats_in_lix = {v for k, v in _plugin_to_sp.items() if k in lix_plugins_in_data}
+
     sev_map = {"critica": ("critical", "Cr&iacute;tica"), "alta": ("critical", "Alta"), "media": ("medium", "Media")}
     border_map = {"critica": "#ef4444", "alta": "#f97316", "media": "#eab308"}
     for spf in sorted(sp_findings, key=lambda x: ["critica", "alta", "media"].index(x.get("severity", "media"))):
+        cat = spf.get("category", "")
+        if cat in sp_cats_in_lix:
+            continue
         sp_sev, sp_label = sev_map.get(spf.get("severity", "media"), ("medium", "Media"))
         sp_border = border_map.get(spf.get("severity", "media"), "#eab308")
-        cat = spf.get("category", "")
 
         if cat == "git_exposed" and sp_git_data:
             sp_body = f'<p>El directorio <code>.git</code> del repositorio de c&oacute;digo fuente es accesible p&uacute;blicamente en: <code>{escape(spf.get("url", ""))}</code></p>'
@@ -379,7 +401,8 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
     cms_name = tech_data.get("cms", "")
     cve_findings = tech_data.get("cve_findings", [])
     plugins_detected = tech_data.get("plugins", [])
-    if tks < 8 or cve_findings:
+    nuclei_detected = tech_data.get("nuclei_detected", [])
+    if tks < 8 or cve_findings or len(nuclei_detected) >= 5:
         sev, sev_label = _sev(min(tks, 7) if cve_findings else tks)
         eol_html = ""
         if eol_software:
@@ -404,6 +427,13 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
             plugins_html = f"""<p>Se han identificado <strong>{len(plugins_detected)}
             componentes adicionales</strong> (plugins) instalados en la web: {plugin_list}.
             Cada uno puede contener sus propios fallos de seguridad si no se mantiene actualizado.</p>"""
+        nuclei_html = ""
+        if nuclei_detected:
+            tech_list = ", ".join(escape(t) for t in nuclei_detected[:15])
+            nuclei_html = f"""<p>El an&aacute;lisis automatizado ha identificado <strong>{len(nuclei_detected)}
+            tecnolog&iacute;as adicionales</strong> en uso: {tech_list}.
+            Cada tecnolog&iacute;a expuesta ampl&iacute;a la superficie de ataque al revelar
+            componentes espec&iacute;ficos del sistema.</p>"""
         cve_html = ""
         if cve_findings:
             total_all = sum(cf.get("cves_total", 0) for cf in cve_findings)
@@ -436,7 +466,7 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
         findings_html += f"""
         <div class="finding-card">
           <h3><span class="badge sev-{sev}">{sev_label}</span> &nbsp;Software obsoleto y/o informaci&oacute;n t&eacute;cnica expuesta</h3>
-          {eol_html}{disclosure_html}{cms_html}{plugins_html}{cve_html}
+          {eol_html}{disclosure_html}{cms_html}{plugins_html}{nuclei_html}{cve_html}
           <p><span class="risk-label">Riesgo:</span> Operar con software sin soporte de seguridad supone un
           riesgo significativo. Las vulnerabilidades listadas son p&uacute;blicamente conocidas y pueden ser
           explotadas por atacantes. En caso de brecha de datos, el uso de software obsoleto podr&iacute;a
@@ -578,6 +608,41 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
           <p><span class="risk-label">Riesgo:</span> Cada servicio expuesto a Internet es un punto de entrada
           potencial. Los puertos y servicios innecesarios aumentan la superficie de ataque y pueden contener
           vulnerabilidades que permitan el acceso no autorizado a sistemas internos.</p>
+        </div>"""
+
+    # LeakIX finding — confirmed data exposures with plugin details
+    lix_leaks = leakix_data.get("leaks", []) if isinstance(leakix_data, dict) else []
+    lix_plugin_details = leakix_data.get("plugin_details", []) if isinstance(leakix_data, dict) else []
+    lix_sev = leakix_data.get("severity_breakdown", {}) if isinstance(leakix_data, dict) else {}
+    if lix_leaks:
+        lix_crit = lix_sev.get("critical", 0) + lix_sev.get("high", 0)
+        lix_score = 3 if lix_crit > 0 else 6
+        sev, sev_label = _sev(lix_score)
+        sev_items = ", ".join(f"<strong>{v}</strong> de severidad {escape(k)}" for k, v in lix_sev.items())
+        sev_colors = {"critical": "#dc2626", "high": "#ea580c", "medium": "#f59e0b", "low": "#3b82f6", "info": "#94a3b8"}
+        plugin_rows = ""
+        for pd in lix_plugin_details[:12]:
+            sc = sev_colors.get(pd.get("severity", "info"), "#94a3b8")
+            hv = " &#9888;" if pd.get("high_value") else ""
+            plugin_rows += (
+                f"<tr><td>{escape(pd.get('label', pd.get('plugin', '')))}{hv}</td>"
+                f"<td style='color:{sc};font-weight:600'>{escape(pd.get('severity', ''))}</td>"
+                f"<td>{pd.get('count', 0)}</td></tr>"
+            )
+        plugin_table = f"""<table class="mini-table"><thead><tr>
+            <th>Exposici&oacute;n detectada</th><th>Severidad</th><th>Incidencias</th>
+            </tr></thead><tbody>{plugin_rows}</tbody></table>""" if plugin_rows else ""
+        findings_html += f"""
+        <div class="finding-card">
+          <h3><span class="badge sev-{sev}">{sev_label}</span> &nbsp;Exposiciones de datos confirmadas</h3>
+          <p>Motores de b&uacute;squeda especializados en seguridad han indexado
+          <strong>{len(lix_leaks)} exposiciones confirmadas</strong> en la infraestructura
+          del dominio: {sev_items}.</p>
+          {plugin_table}
+          <p><span class="risk-label">Riesgo:</span> Estas exposiciones no son te&oacute;ricas &mdash;
+          han sido indexadas por motores p&uacute;blicos, lo que significa que cualquier persona puede
+          acceder a la informaci&oacute;n expuesta. Seg&uacute;n el RGPD, la exposici&oacute;n no controlada
+          de datos puede constituir una brecha de seguridad notificable a la AEPD en un plazo de 72 horas.</p>
         </div>"""
 
     # Breach / email exposure finding
@@ -743,7 +808,10 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
         recs_high.append("Revisar y restringir los servicios y puertos expuestos a Internet al m&iacute;nimo necesario")
 
     sp_cats = {f.get("category") for f in sp_findings}
-    if sp_findings:
+    for lix_plug, sp_cat in _plugin_to_sp.items():
+        if lix_plug in lix_plugins_in_data:
+            sp_cats.add(sp_cat)
+    if sp_findings or sp_cats_in_lix:
         sp_crit_cats = {f.get("category") for f in sp_findings if f.get("severity") == "critica"}
         if "git_exposed" in sp_cats:
             recs_high.append("Bloquear el acceso p&uacute;blico al directorio <code>.git</code> y rotar cualquier credencial que haya estado expuesta en el repositorio")

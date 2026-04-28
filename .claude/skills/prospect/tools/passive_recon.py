@@ -6,6 +6,7 @@ no authenticated access. Only public data sources.
 """
 
 import json
+import shutil
 import subprocess
 import sys
 import re
@@ -491,6 +492,338 @@ def check_shodan(domain):
     return results
 
 
+LEAKIX_HIGH_VALUE_PLUGINS = [
+    "GitConfigHttpPlugin",
+    "DotEnvConfigPlugin",
+    "DotDsStoreOpenPlugin",
+    "PhpInfoHttpPlugin",
+    "DjangoPlugin",
+    "FlaskPlugin",
+    "RailsPlugin",
+    "LaravelTelescopeHttpPlugin",
+    "SymfonyProfilerPlugin",
+    "SymfonyVerbosePlugin",
+    "YiiDebugPlugin",
+    "SpringBootActuatorPlugin",
+    "GraphQLIntrospectionPlugin",
+    "SwaggerUIPlugin",
+    "ConfigJsonHttp",
+    "PublicEnvPlugin",
+    "VsCodeSFTPPlugin",
+    "WpUserEnumHttp",
+    "ApacheStatusPlugin",
+    "JenkinsOpenPlugin",
+    "SonarQubePlugin",
+    "ElasticSearchOpenPlugin",
+    "MongoOpenPlugin",
+    "RedisOpenPlugin",
+    "MysqlOpenPlugin",
+    "PostgreSQLOpenPlugin",
+    "CouchDbOpenPlugin",
+    "MemcachedOpenPlugin",
+    "HttpNTLM",
+    "PrometheusPlugin",
+    "GrafanaOpenPlugin",
+    "DockerAPIPlugin",
+    "DockerRegistryHttpPlugin",
+    "JupyterPlugin",
+    "TraversalHttpPlugin",
+    "PhpCgiRcePlugin",
+    "Log4JOpportunistic",
+    "LDAPPlugin",
+    "RsyncOpenPlugin",
+    "WebDAVPlugin",
+    "DNSPlugin",
+    "VNCPlugin",
+    "RdpPlugin",
+    "NodeREDPlugin",
+    "MetabaseHttpPlugin",
+    "OllamaPlugin",
+]
+
+LEAKIX_PLUGIN_LABELS = {
+    "GitConfigHttpPlugin": "Repositorio Git expuesto (.git/config)",
+    "DotEnvConfigPlugin": "Archivo .env con credenciales expuesto",
+    "DotDsStoreOpenPlugin": "Archivo .DS_Store expuesto (listado de directorios)",
+    "PhpInfoHttpPlugin": "Página phpinfo() expuesta (configuración del servidor)",
+    "DjangoPlugin": "Django en modo DEBUG (traza de errores pública)",
+    "FlaskPlugin": "Flask en modo DEBUG (consola interactiva pública)",
+    "RailsPlugin": "Rails en modo DEBUG (traza de errores pública)",
+    "LaravelTelescopeHttpPlugin": "Panel Laravel Telescope expuesto",
+    "SymfonyProfilerPlugin": "Profiler de Symfony expuesto",
+    "SymfonyVerbosePlugin": "Symfony en modo verbose (errores detallados)",
+    "YiiDebugPlugin": "Panel de debug Yii expuesto",
+    "SpringBootActuatorPlugin": "Spring Boot Actuator expuesto (métricas y configuración)",
+    "GraphQLIntrospectionPlugin": "GraphQL con introspección habilitada",
+    "SwaggerUIPlugin": "Documentación Swagger/OpenAPI expuesta",
+    "ConfigJsonHttp": "Archivo config.json expuesto",
+    "PublicEnvPlugin": "Variables de entorno públicas (Next.js/Vite/Nuxt)",
+    "VsCodeSFTPPlugin": "Credenciales SFTP de VS Code expuestas",
+    "WpUserEnumHttp": "Enumeración de usuarios WordPress vía API REST",
+    "ApacheStatusPlugin": "Página server-status de Apache expuesta",
+    "JenkinsOpenPlugin": "Jenkins sin autenticación",
+    "SonarQubePlugin": "SonarQube público (posible fuga de código fuente)",
+    "ElasticSearchOpenPlugin": "Elasticsearch/Kibana sin autenticación",
+    "MongoOpenPlugin": "MongoDB sin autenticación",
+    "RedisOpenPlugin": "Redis sin autenticación",
+    "MysqlOpenPlugin": "MySQL sin autenticación",
+    "PostgreSQLOpenPlugin": "PostgreSQL sin autenticación",
+    "CouchDbOpenPlugin": "CouchDB sin autenticación",
+    "MemcachedOpenPlugin": "Memcached expuesto públicamente",
+    "HttpNTLM": "Servidor acepta credenciales NTLM anónimas",
+    "PrometheusPlugin": "Prometheus expuesto (métricas de infraestructura)",
+    "GrafanaOpenPlugin": "Grafana con versión vulnerable",
+    "DockerAPIPlugin": "API de Docker sin autenticación",
+    "DockerRegistryHttpPlugin": "Registry de Docker público",
+    "JupyterPlugin": "Jupyter Notebook sin autenticación",
+    "TraversalHttpPlugin": "Vulnerabilidad de path traversal",
+    "PhpCgiRcePlugin": "PHP-CGI vulnerable a ejecución remota de código",
+    "Log4JOpportunistic": "Servidor vulnerable a Log4Shell",
+    "LDAPPlugin": "LDAP permite binding anónimo",
+    "RsyncOpenPlugin": "Rsync expuesto sin autenticación",
+    "WebDAVPlugin": "WebDAV sin autenticación",
+    "DNSPlugin": "Servidor DNS permite transferencias de zona",
+    "VNCPlugin": "VNC sin autenticación",
+    "RdpPlugin": "RDP sin Network Level Authentication",
+    "NodeREDPlugin": "Node-RED sin autenticación",
+    "MetabaseHttpPlugin": "Metabase con versión vulnerable",
+    "OllamaPlugin": "Ollama (LLM) expuesto públicamente",
+}
+
+
+def check_leakix(domain):
+    """Query LeakIX for confirmed data exposures and misconfigured services.
+
+    Calls /domain/{domain} for full results, then searches for high-value
+    plugins specifically. Never stores or displays actual credentials.
+    """
+    results = {
+        "raw": "", "services": [], "leaks": [], "score": 10,
+        "leak_count": 0, "service_count": 0,
+        "severity_breakdown": {}, "plugins_detected": [],
+        "plugin_details": [],
+    }
+
+    api_key = os.environ.get("LEAKIX_API_KEY", "")
+    if not api_key:
+        results["raw"] = "LEAKIX_API_KEY not set — skipping"
+        return results
+
+    def _leakix_get(path):
+        return run_cmd(
+            f'curl -s -m 15 -H "api-key: {api_key}" '
+            f'-H "Accept: application/json" '
+            f'"{path}"'
+        )
+
+    raw = _leakix_get(f"https://leakix.net/domain/{domain}")
+    results["raw"] = raw
+
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return results
+
+    if isinstance(data, dict) and data.get("error"):
+        results["raw"] += f"\nAPI error: {data['error']}"
+        return results
+
+    raw_services = data.get("Services") or []
+    raw_leaks = data.get("Leaks") or []
+
+    for svc in raw_services:
+        sw = svc.get("service", {}).get("software", {})
+        modules = sw.get("modules") or []
+        svc_entry = {
+            "ip": svc.get("ip", ""),
+            "host": svc.get("host", ""),
+            "port": svc.get("port", ""),
+            "protocol": svc.get("protocol", ""),
+            "transport": svc.get("transport") or [],
+            "software": sw.get("name", ""),
+            "version": sw.get("version", ""),
+            "os": sw.get("os", ""),
+            "modules": [{"name": m.get("name", ""), "version": m.get("version", "")}
+                        for m in modules if m.get("name")],
+            "plugin": svc.get("event_source", ""),
+            "time": svc.get("time", ""),
+            "tags": svc.get("tags") or [],
+        }
+        http = svc.get("http") or {}
+        if http:
+            svc_entry["http"] = {
+                "url": http.get("url", ""),
+                "status": http.get("status", 0),
+                "title": http.get("title", ""),
+                "headers": http.get("header") or {},
+            }
+        ssl = svc.get("ssl") or {}
+        if ssl.get("detected"):
+            cert = ssl.get("certificate") or {}
+            svc_entry["ssl"] = {
+                "version": ssl.get("version", ""),
+                "cipher": ssl.get("cypher_suite", ""),
+                "jarm": ssl.get("jarm", ""),
+                "cn": cert.get("cn", ""),
+                "san": cert.get("domain") or [],
+                "issuer": cert.get("issuer_name", ""),
+                "valid": cert.get("valid", False),
+                "not_after": cert.get("not_after", ""),
+            }
+        geo = svc.get("geoip") or {}
+        if geo.get("country_name"):
+            svc_entry["geoip"] = {
+                "country": geo.get("country_name", ""),
+                "country_code": geo.get("country_iso_code", ""),
+                "city": geo.get("city_name", ""),
+                "region": geo.get("region_name", ""),
+            }
+        net = svc.get("network") or {}
+        if net.get("organization_name"):
+            svc_entry["network"] = {
+                "org": net.get("organization_name", ""),
+                "asn": net.get("asn", 0),
+                "cidr": net.get("network", ""),
+            }
+        noauth = svc.get("service", {}).get("credentials", {}).get("noauth", False)
+        if noauth:
+            svc_entry["noauth"] = True
+        results["services"].append(svc_entry)
+
+    severity_count = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    seen_plugins = set()
+    seen_fingerprints = set()
+
+    def _process_leak(leak):
+        fp = leak.get("event_fingerprint", "")
+        if fp and fp in seen_fingerprints:
+            return
+        if fp:
+            seen_fingerprints.add(fp)
+        leak_meta = leak.get("leak", {})
+        sev = (leak_meta.get("severity") or "info").lower()
+        severity_count[sev] = severity_count.get(sev, 0) + 1
+        plugin = leak.get("event_source", "")
+        if plugin and plugin not in seen_plugins:
+            seen_plugins.add(plugin)
+        dataset = leak_meta.get("dataset") or {}
+        entry = {
+            "plugin": plugin,
+            "severity": sev,
+            "stage": leak_meta.get("stage", ""),
+            "type": leak_meta.get("type", ""),
+            "summary": (leak.get("summary") or "")[:500],
+            "ip": leak.get("ip", ""),
+            "host": leak.get("host", ""),
+            "port": leak.get("port", ""),
+            "protocol": leak.get("protocol", ""),
+            "transport": leak.get("transport") or [],
+            "time": leak.get("time", ""),
+            "fingerprint": fp,
+            "tags": leak.get("tags") or [],
+            "dataset": {
+                "rows": dataset.get("rows", 0),
+                "files": dataset.get("files", 0),
+                "size": dataset.get("size", 0),
+                "collections": dataset.get("collections", 0),
+                "infected": dataset.get("infected", False),
+            },
+        }
+        http = leak.get("http") or {}
+        if http:
+            entry["http"] = {
+                "url": http.get("url", ""),
+                "status": http.get("status", 0),
+                "title": http.get("title", ""),
+                "headers": http.get("header") or {},
+            }
+        sw = leak.get("service", {}).get("software", {})
+        if sw.get("name"):
+            entry["software"] = {
+                "name": sw.get("name", ""),
+                "version": sw.get("version", ""),
+                "os": sw.get("os", ""),
+            }
+        geo = leak.get("geoip") or {}
+        if geo.get("country_name"):
+            entry["geoip"] = {
+                "country": geo.get("country_name", ""),
+                "country_code": geo.get("country_iso_code", ""),
+                "city": geo.get("city_name", ""),
+            }
+        net = leak.get("network") or {}
+        if net.get("organization_name"):
+            entry["network"] = {
+                "org": net.get("organization_name", ""),
+                "asn": net.get("asn", 0),
+                "cidr": net.get("network", ""),
+            }
+        noauth = leak.get("service", {}).get("credentials", {}).get("noauth", False)
+        if noauth:
+            entry["noauth"] = True
+        results["leaks"].append(entry)
+
+    for leak in raw_leaks:
+        _process_leak(leak)
+
+    import time as _time
+    search_raw = _leakix_get(
+        f"https://leakix.net/search?q=%2Bhost%3A{domain}&scope=leak&page=0"
+    )
+    _time.sleep(1.1)
+    try:
+        search_results = json.loads(search_raw)
+        if isinstance(search_results, list):
+            for leak in search_results:
+                _process_leak(leak)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    results["leak_count"] = len(results["leaks"])
+    results["service_count"] = len(raw_services)
+    results["severity_breakdown"] = {k: v for k, v in severity_count.items() if v > 0}
+    results["plugins_detected"] = sorted(seen_plugins)
+
+    for plugin_name in seen_plugins:
+        label = LEAKIX_PLUGIN_LABELS.get(plugin_name, plugin_name)
+        is_high_value = plugin_name in LEAKIX_HIGH_VALUE_PLUGINS
+        leak_entries = [lk for lk in results["leaks"] if lk["plugin"] == plugin_name]
+        worst_sev = "info"
+        for lk in leak_entries:
+            for s in ("critical", "high", "medium", "low"):
+                if lk["severity"] == s:
+                    if ("critical", "high", "medium", "low", "info").index(s) < \
+                       ("critical", "high", "medium", "low", "info").index(worst_sev):
+                        worst_sev = s
+        results["plugin_details"].append({
+            "plugin": plugin_name,
+            "label": label,
+            "high_value": is_high_value,
+            "severity": worst_sev,
+            "count": len(leak_entries),
+        })
+
+    results["plugin_details"].sort(
+        key=lambda x: (
+            not x["high_value"],
+            ("critical", "high", "medium", "low", "info").index(x["severity"]),
+        )
+    )
+
+    crit = severity_count["critical"]
+    high = severity_count["high"]
+    medium = severity_count["medium"]
+    if crit > 0:
+        results["score"] -= min(crit * 3, 6)
+    if high > 0:
+        results["score"] -= min(high * 2, 4)
+    if medium > 0:
+        results["score"] -= min(medium, 2)
+    results["score"] = max(1, results["score"])
+
+    return results
+
+
 def check_sensitive_paths(domain):
     """Check for exposed sensitive files, admin panels, and misconfigurations."""
     results = {"raw": "", "findings": [], "score": 10}
@@ -687,6 +1020,44 @@ def check_sensitive_paths(domain):
     return results
 
 
+def _parse_git_index(base_url):
+    """Parse .git/index binary to extract file paths."""
+    import struct
+    try:
+        with open("/tmp/.prospect_git_index", "rb") as fh:
+            data = fh.read()
+        if len(data) < 12 or data[:4] != b"DIRC":
+            return []
+        version = struct.unpack(">I", data[4:8])[0]
+        num_entries = struct.unpack(">I", data[8:12])[0]
+        if num_entries > 10000 or version not in (2, 3, 4):
+            return []
+        files = []
+        offset = 12
+        for _ in range(min(num_entries, 500)):
+            if offset + 62 > len(data):
+                break
+            flags = struct.unpack(">H", data[offset + 60:offset + 62])[0]
+            name_len = flags & 0x0FFF
+            name_offset = offset + 62
+            if version >= 3 and (flags & 0x4000):
+                name_offset += 2
+            if name_len == 0x0FFF:
+                null_pos = data.find(b"\x00", name_offset)
+                if null_pos == -1:
+                    break
+                name = data[name_offset:null_pos].decode("utf-8", errors="replace")
+            else:
+                name = data[name_offset:name_offset + name_len].decode("utf-8", errors="replace")
+            if name and all(c.isprintable() or c == "/" for c in name):
+                files.append(name)
+            entry_raw_len = (name_offset - offset) + len(name.encode("utf-8"))
+            offset += ((entry_raw_len + 8) // 8) * 8
+        return files
+    except Exception:
+        return []
+
+
 def _check_git_exposed(base_url, domain):
     """Check for exposed .git directory. Returns a finding dict or None."""
     for base in [base_url, base_url.replace("https://", "http://") if "https" in base_url else base_url.replace("http://", "https://")]:
@@ -737,15 +1108,22 @@ def _check_git_exposed(base_url, domain):
                         "author": match.group(3), "message": match.group(5),
                     })
 
-        index_raw = run_cmd(
+        index_bin = run_cmd(
             f'curl -sk -H "User-Agent: Mozilla/5.0" "{base}/.git/index" -m 10 '
-            f'| strings | grep -E "^[a-zA-Z0-9_./-]{{3,}}$" | head -100'
+            f'-o /tmp/.prospect_git_index 2>/dev/null && cat /tmp/.prospect_git_index'
         )
-        if index_raw:
-            files = [f.strip() for f in index_raw.splitlines()
-                     if f.strip() and not f.strip().startswith("DIRC")
-                     and ("/" in f.strip() or "." in f.strip())]
-            git_data["files"] = files[:100]
+        git_data["files"] = _parse_git_index(base)
+        if not git_data["files"]:
+            index_strings = run_cmd(
+                f'strings /tmp/.prospect_git_index 2>/dev/null '
+                f'| grep -E "^[a-zA-Z0-9_./-]{{3,}}$" | head -200'
+            )
+            if index_strings:
+                git_data["files"] = [
+                    f.strip() for f in index_strings.splitlines()
+                    if f.strip() and not f.strip().startswith("DIRC")
+                    and ("/" in f.strip() or "." in f.strip())
+                ][:200]
 
         obj_test = run_cmd(
             f'curl -sk -o /dev/null -w "%{{http_code}}" '
@@ -753,6 +1131,39 @@ def _check_git_exposed(base_url, domain):
         )
         if obj_test.strip() == "200":
             git_data["objects_accessible"] = True
+
+        desc_raw = run_cmd(f'curl -sk -H "User-Agent: Mozilla/5.0" "{base}/.git/description" -m 5')
+        if desc_raw and not desc_raw.startswith("<!") and "Unnamed repository" not in desc_raw:
+            git_data["description"] = desc_raw.strip()[:200]
+
+        fetch_raw = run_cmd(f'curl -sk -H "User-Agent: Mozilla/5.0" "{base}/.git/FETCH_HEAD" -m 5')
+        if fetch_raw and re.match(r'^[0-9a-f]{40}', fetch_raw.strip()):
+            git_data["fetch_head"] = fetch_raw.strip()[:200]
+
+        if git_data["files"]:
+            sensitive_patterns = [
+                ".env", "config", "password", "secret", "credential", "key",
+                "token", "database", "db", "wp-config", "settings.py",
+                "application.yml", "application.properties", "appsettings",
+                ".pem", ".key", ".p12", "id_rsa", "htpasswd", "shadow",
+                "docker-compose", "Dockerfile", "Vagrantfile", ".sql",
+            ]
+            git_data["sensitive_files"] = [
+                f for f in git_data["files"]
+                if any(p in f.lower() for p in sensitive_patterns)
+            ]
+            exts = {}
+            dirs = set()
+            for f in git_data["files"]:
+                parts = f.rsplit(".", 1)
+                if len(parts) == 2:
+                    ext = parts[1].lower()
+                    exts[ext] = exts.get(ext, 0) + 1
+                if "/" in f:
+                    dirs.add(f.rsplit("/", 1)[0])
+            git_data["file_extensions"] = dict(sorted(exts.items(), key=lambda x: -x[1])[:20])
+            git_data["directories"] = sorted(dirs)[:50]
+            git_data["file_count"] = len(git_data["files"])
 
         return {
             "category": "git_exposed",
@@ -763,7 +1174,7 @@ def _check_git_exposed(base_url, domain):
             "risk": "La exposición del directorio .git permite a cualquier atacante descargar el código fuente completo de la aplicación, incluyendo posibles credenciales, claves API, configuraciones internas y lógica de negocio.",
             "size": 0,
             "content_type": "",
-            "extracted": git_data.get("files", [])[:20],
+            "extracted": git_data.get("files", [])[:30],
             "git_data": git_data,
         }
 
@@ -946,7 +1357,7 @@ def _wayback_emails(domain):
             continue
         urls_seen.add(norm)
         wb_url = f"https://web.archive.org/web/{ts}/{url}"
-        raw = run_cmd(f'curl -sL -m 10 "{wb_url}" 2>/dev/null', timeout=15)
+        raw = run_cmd(f'curl -sL --max-redirs 3 -m 10 "{wb_url}" 2>/dev/null', timeout=15)
         if raw:
             found = set(re.findall(r'[a-zA-Z0-9._%+\-]+@' + re.escape(domain), raw))
             for e in found:
@@ -1331,6 +1742,96 @@ def _lookup_cves(tech_data):
     return findings
 
 
+def run_nuclei_tech(domain):
+    """Run nuclei with safe technology-detection templates only.
+
+    Uses http/technologies/ folder with strict safety flags:
+    no interactsh, no CVE/exploit tags, rate-limited to 10 req/s.
+    Returns list of detected technologies from JSONL output.
+    """
+    if not shutil.which("nuclei"):
+        return {"technologies": [], "raw_matches": 0, "error": "nuclei not installed"}
+
+    cmd = [
+        "nuclei",
+        "-u", f"https://{domain}",
+        "-t", "http/technologies/",
+        "-exclude-tags", "intrusive,dos,fuzz,oast",
+        "-jsonl",
+        "-silent",
+        "-rate-limit", "10",
+        "-timeout", "10",
+        "-no-interactsh",
+        "-disable-update-check",
+    ]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120
+        )
+        output = proc.stdout.strip()
+    except subprocess.TimeoutExpired:
+        return {"technologies": [], "raw_matches": 0, "error": "timeout"}
+    except Exception as e:
+        return {"technologies": [], "raw_matches": 0, "error": str(e)}
+
+    technologies = []
+    seen_ids = set()
+    for line in output.split("\n"):
+        if not line.strip():
+            continue
+        try:
+            match = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        tid = match.get("template-id", "")
+        if tid in seen_ids:
+            continue
+        seen_ids.add(tid)
+        info = match.get("info", {})
+        extracted = match.get("extracted-results") or []
+        tech = {
+            "id": tid,
+            "name": info.get("name", tid),
+            "severity": info.get("severity", "info"),
+            "tags": info.get("tags", []),
+            "matched_at": match.get("matched-at", ""),
+            "extracted": extracted,
+        }
+        technologies.append(tech)
+
+    return {"technologies": technologies, "raw_matches": len(technologies)}
+
+
+def _merge_nuclei_into_tech(tech_results, nuclei_results):
+    """Merge nuclei technology detections into existing tech results."""
+    if nuclei_results.get("error") or not nuclei_results.get("technologies"):
+        return
+
+    known_cms = tech_results.get("cms", "").lower()
+    known_versions = {v.lower() for v in tech_results.get("version_disclosure", [])}
+
+    nuclei_extra = []
+    for t in nuclei_results["technologies"]:
+        name = t["name"]
+        name_lower = name.lower()
+
+        if known_cms and known_cms.split()[0] in name_lower:
+            continue
+        already_known = any(name_lower in kv for kv in known_versions)
+        if already_known:
+            continue
+
+        nuclei_extra.append(name)
+
+        if not tech_results["cms"] and any(
+            kw in name_lower for kw in ("wordpress", "joomla", "drupal", "prestashop", "magento", "shopify", "wix", "squarespace", "webflow", "typo3")
+        ):
+            tech_results["cms"] = name
+
+    if nuclei_extra:
+        tech_results.setdefault("nuclei_detected", []).extend(nuclei_extra)
+
+
 def check_tech(domain):
     """Detect technologies, versions, plugins, and CVE risks."""
     results = {
@@ -1700,7 +2201,9 @@ def run_recon(domain, output_dir, company="", sector=""):
         "dns": lambda: check_dns(domain),
         "subdomains": lambda: check_subdomains(domain),
         "shodan": lambda: check_shodan(domain),
+        "leakix": lambda: check_leakix(domain),
         "tech": lambda: check_tech(domain),
+        "nuclei": lambda: run_nuclei_tech(domain),
         "emails": lambda: harvest_emails(domain),
         "compliance": lambda: check_compliance(domain),
         "sensitive_paths": lambda: check_sensitive_paths(domain),
@@ -1764,6 +2267,10 @@ def run_recon(domain, output_dir, company="", sector=""):
         results["breach"]["linkedin_confirmed"] = linkedin_confirmed
         results["breach"]["people_checked"] = len(candidate_pool)
 
+    nuclei_data = results.pop("nuclei", {})
+    if "tech" in results:
+        _merge_nuclei_into_tech(results["tech"], nuclei_data)
+
     for name, data in results.items():
         raw = data.get("raw", "")
         if raw:
@@ -1771,12 +2278,23 @@ def run_recon(domain, output_dir, company="", sector=""):
                 raw if isinstance(raw, str) else json.dumps(raw, indent=2)
             )
 
+    if nuclei_data.get("technologies"):
+        (evidence_dir / "nuclei.json").write_text(
+            json.dumps(nuclei_data, indent=2, default=str)
+        )
+
     if "subdomains" in results and results["subdomains"].get("subdomains"):
         (evidence_dir / "subdomains.json").write_text(
             json.dumps(results["subdomains"]["subdomains"], indent=2)
         )
     if "shodan" in results and results["shodan"].get("raw"):
         (evidence_dir / "shodan.json").write_text(results["shodan"]["raw"])
+    if "leakix" in results:
+        lix_evidence = {k: v for k, v in results["leakix"].items() if k != "raw"}
+        if lix_evidence.get("leak_count", 0) > 0 or lix_evidence.get("service_count", 0) > 0:
+            (evidence_dir / "leakix.json").write_text(
+                json.dumps(lix_evidence, indent=2, ensure_ascii=False, default=str)
+            )
     if "tech" in results:
         tech_evidence = {k: v for k, v in results["tech"].items() if k != "raw"}
         (evidence_dir / "tech.json").write_text(
@@ -1807,6 +2325,9 @@ def run_recon(domain, output_dir, company="", sector=""):
             json.dumps(sp_evidence, indent=2, default=str)
         )
 
+    lix = results.get("leakix", {})
+    lix_has_data = lix.get("leak_count", 0) > 0 or lix.get("service_count", 0) > 0
+
     scores = {
         "headers": results.get("headers", {}).get("score", 5),
         "tech": results.get("tech", {}).get("score", 5),
@@ -1820,8 +2341,20 @@ def run_recon(domain, output_dir, company="", sector=""):
         "compliance": results.get("compliance", {}).get("score", 5),
         "misconfig": results.get("sensitive_paths", {}).get("score", 10),
     }
+    if lix_has_data:
+        scores["leakix"] = lix.get("score", 10)
 
-    weights = {"headers": 0.05, "tech": 0.15, "tls": 0.05, "dns": 0.10, "exposure": 0.10, "breach": 0.15, "compliance": 0.15, "misconfig": 0.25}
+    if lix_has_data:
+        weights = {
+            "headers": 0.05, "tech": 0.10, "tls": 0.05, "dns": 0.10,
+            "exposure": 0.10, "leakix": 0.10, "breach": 0.10,
+            "compliance": 0.15, "misconfig": 0.25,
+        }
+    else:
+        weights = {
+            "headers": 0.05, "tech": 0.15, "tls": 0.05, "dns": 0.10,
+            "exposure": 0.10, "breach": 0.15, "compliance": 0.15, "misconfig": 0.25,
+        }
     total = sum(scores[k] * weights[k] * 10 for k in scores)
 
     if total >= 90:
@@ -1855,6 +2388,18 @@ def run_recon(domain, output_dir, company="", sector=""):
         if hostnames:
             parts.append(f"hostnames: {', '.join(hostnames[:5])}")
         return "; ".join(parts) if parts else ""
+
+    lix_detail = ""
+    if lix_has_data:
+        lix_parts = []
+        if lix.get("leak_count", 0) > 0:
+            lix_parts.append(f"{lix['leak_count']} exposiciones confirmadas")
+            sev_bd = lix.get("severity_breakdown", {})
+            if sev_bd:
+                lix_parts.append(", ".join(f"{v} {k}" for k, v in sev_bd.items()))
+        if lix.get("plugins_detected"):
+            lix_parts.append(f"plugins: {', '.join(lix['plugins_detected'][:5])}")
+        lix_detail = "; ".join(lix_parts)
 
     # Build details summary for each area
     br = results.get("breach", {})
@@ -1905,13 +2450,344 @@ def run_recon(domain, output_dir, company="", sector=""):
             "tls": tls_detail,
             "compliance": comp_detail,
             "exposure": _build_exposure_detail(results),
+            "leakix": lix_detail,
         },
     }
 
     (output_path / "scoring" / "scores.json").write_text(json.dumps(scoring, indent=2))
 
     results["scoring"] = scoring
+
+    _save_recon_completo(results, domain, company, sector, scoring, evidence_dir, nuclei_data)
+
     return results
+
+
+def _save_recon_completo(results, domain, company, sector, scoring, evidence_dir, nuclei_data):
+    """Build and save a comprehensive, classified recon report to evidence/recon_completo.json."""
+    headers = results.get("headers", {})
+    tech = results.get("tech", {})
+    tls_data = results.get("tls", {})
+    dns = results.get("dns", {})
+    subs = results.get("subdomains", {})
+    shodan = results.get("shodan", {})
+    lix = results.get("leakix", {})
+    emails = results.get("emails", {})
+    breach = results.get("breach", {})
+    compliance = results.get("compliance", {})
+    sp = results.get("sensitive_paths", {})
+
+    sensitive_patterns = [
+        ".env", "config", "password", "secret", "credential", "key",
+        "token", "database", "wp-config", "settings.py", "application.yml",
+        ".pem", ".p12", "id_rsa", "htpasswd", ".sql", "docker-compose",
+    ]
+
+    lix_services = lix.get("services", [])
+    lix_leaks = lix.get("leaks", [])
+    geos = {}
+    networks = {}
+    ips_seen = set()
+    for item in lix_services + lix_leaks:
+        ip = item.get("ip", "")
+        if ip and ip not in ips_seen:
+            ips_seen.add(ip)
+            if item.get("geoip"):
+                geos[ip] = item["geoip"]
+            if item.get("network"):
+                networks[ip] = item["network"]
+
+    ports_lix = sorted(set(item.get("port", "") for item in lix_services if item.get("port")))
+    ports_shodan = [str(p) for p in shodan.get("ports", [])]
+    all_ports = sorted(set(ports_lix + ports_shodan), key=lambda x: int(x) if x.isdigit() else 0)
+
+    sp_findings = sp.get("findings", [])
+    git_data = sp.get("git_exposed", {})
+
+    classified_findings = {"critica": [], "alta": [], "media": []}
+    for f in sp_findings:
+        entry = {
+            "categoria": f.get("category", ""),
+            "titulo": f.get("title", ""),
+            "url": f.get("url", ""),
+            "severidad": f.get("severity", "media"),
+            "riesgo": f.get("risk", ""),
+            "datos_extraidos": f.get("extracted", []),
+        }
+        if f.get("category") == "git_exposed" and git_data:
+            entry["repositorio"] = {
+                "head": git_data.get("head_ref", ""),
+                "remote_url": git_data.get("config", {}).get("remote_url", ""),
+                "descripcion": git_data.get("description", ""),
+                "archivos_total": git_data.get("file_count", len(git_data.get("files", []))),
+                "archivos": git_data.get("files", []),
+                "archivos_sensibles": git_data.get("sensitive_files", []),
+                "extensiones": git_data.get("file_extensions", {}),
+                "directorios": git_data.get("directories", []),
+                "refs": git_data.get("refs", []),
+                "commits": git_data.get("log_entries", []),
+                "objects_accesibles": git_data.get("objects_accessible", False),
+                "fetch_head": git_data.get("fetch_head", ""),
+            }
+        sev = f.get("severity", "media")
+        classified_findings.get(sev, classified_findings["media"]).append(entry)
+
+    lix_classified = {"critica": [], "alta": [], "media": [], "baja": [], "info": []}
+    sev_map_lix = {"critical": "critica", "high": "alta", "medium": "media", "low": "baja", "info": "info"}
+    for lk in lix_leaks:
+        entry = {
+            "plugin": lk.get("plugin", ""),
+            "etiqueta": LEAKIX_PLUGIN_LABELS.get(lk.get("plugin", ""), lk.get("plugin", "")),
+            "severidad": lk.get("severity", "info"),
+            "etapa": lk.get("stage", ""),
+            "tipo": lk.get("type", ""),
+            "resumen": lk.get("summary", ""),
+            "ip": lk.get("ip", ""),
+            "host": lk.get("host", ""),
+            "puerto": lk.get("port", ""),
+            "protocolo": lk.get("protocol", ""),
+            "transporte": lk.get("transport", []),
+            "fecha": lk.get("time", ""),
+            "tags": lk.get("tags", []),
+            "sin_autenticacion": lk.get("noauth", False),
+            "dataset": lk.get("dataset", {}),
+        }
+        if lk.get("http"):
+            entry["http"] = lk["http"]
+        if lk.get("software"):
+            entry["software"] = lk["software"]
+        if lk.get("geoip"):
+            entry["geoip"] = lk["geoip"]
+        if lk.get("network"):
+            entry["network"] = lk["network"]
+        sev_es = sev_map_lix.get(lk.get("severity", "info"), "info")
+        lix_classified[sev_es].append(entry)
+    lix_classified = {k: v for k, v in lix_classified.items() if v}
+
+    nuclei_techs = nuclei_data.get("technologies", []) if nuclei_data else []
+    tech_detected = []
+    _seen_tech = set()
+
+    def _add_tech(entry):
+        key = entry.get("nombre", "").lower().split("/")[0].strip()
+        if key and key in _seen_tech:
+            return
+        if key:
+            _seen_tech.add(key)
+        tech_detected.append(entry)
+
+    if tech.get("cms"):
+        _add_tech({"tipo": "CMS", "nombre": tech["cms"], "version": tech.get("cms_version", "")})
+    if tech.get("server"):
+        _add_tech({"tipo": "Servidor Web", "nombre": tech["server"]})
+    if tech.get("powered_by"):
+        _add_tech({"tipo": "Framework", "nombre": tech["powered_by"]})
+    for vd in tech.get("version_disclosure", []):
+        name_base = vd.split("/")[0].strip().lower()
+        if name_base not in _seen_tech:
+            _add_tech({"tipo": "Version Disclosure", "nombre": vd})
+    for eol in tech.get("eol_software", []):
+        _add_tech({"tipo": "EOL Software", "nombre": eol.get("name", ""), "eol_date": eol.get("eol_date", ""), "riesgo": "alto"})
+    for nt in nuclei_techs:
+        _add_tech({"tipo": "Nuclei Detection", "nombre": nt.get("name", ""), "matched_at": nt.get("matched_at", "")})
+    for sw_item in lix_services:
+        if sw_item.get("software"):
+            _add_tech({
+                "tipo": "LeakIX Service",
+                "nombre": sw_item["software"],
+                "version": sw_item.get("version", ""),
+                "puerto": sw_item.get("port", ""),
+                "os": sw_item.get("os", ""),
+                "modulos": sw_item.get("modules", []),
+            })
+
+    cve_findings = tech.get("cve_findings", [])
+    shodan_cves = set(shodan.get("vulns", []))
+    cves = []
+    seen_cve_ids = set()
+    for cf in cve_findings:
+        sample = cf.get("cves", [])[:20]
+        for c in sample:
+            cid = c[0] if isinstance(c, (list, tuple)) else c.get("id", "")
+            seen_cve_ids.add(cid)
+        cves.append({
+            "software": cf.get("software", ""),
+            "version": cf.get("version", ""),
+            "cves_total": cf.get("cves_total", 0),
+            "criticos": cf.get("critical", 0),
+            "altos": cf.get("high", 0),
+            "cves": sample,
+        })
+    shodan_only_cves = sorted(shodan_cves - seen_cve_ids)
+    if shodan_only_cves:
+        cves.append({
+            "software": "Shodan (sin atribuir)",
+            "version": "",
+            "cves_total": len(shodan_only_cves),
+            "criticos": 0,
+            "altos": 0,
+            "cves": shodan_only_cves,
+        })
+
+    lix_plugins_set = set(lix.get("plugins_detected", []))
+    plugin_to_sp_cat = {
+        "GitConfigHttpPlugin": "git_exposed",
+        "DotEnvConfigPlugin": "env_file",
+        "DotDsStoreOpenPlugin": "ds_store",
+        "PhpInfoHttpPlugin": "phpinfo",
+        "ApacheStatusPlugin": "server_status",
+        "WpUserEnumHttp": "wp_user_enum",
+    }
+    sp_cats_covered_by_lix = set()
+    for plugin, sp_cat in plugin_to_sp_cat.items():
+        if plugin in lix_plugins_set:
+            sp_cats_covered_by_lix.add(sp_cat)
+
+    for sev_key in classified_findings:
+        classified_findings[sev_key] = [
+            f for f in classified_findings[sev_key]
+            if f.get("categoria") not in sp_cats_covered_by_lix
+        ]
+
+    breached_emails = breach.get("breached_emails", [])
+    all_emails = emails.get("emails", [])
+    email_sources = emails.get("sources", {})
+
+    shodan_hostnames = set(shodan.get("hostnames", []))
+    sub_list = subs.get("subdomains", [])
+    shodan_only_hostnames = sorted(shodan_hostnames - set(sub_list))
+
+    report = {
+        "meta": {
+            "dominio": domain,
+            "empresa": company,
+            "sector": sector,
+            "fecha": datetime.utcnow().isoformat(),
+            "version": "2.0",
+        },
+        "puntuacion": {
+            "total": scoring.get("total", 0),
+            "grado": scoring.get("grade", "?"),
+            "categorias": scoring.get("scores", {}),
+        },
+        "infraestructura": {
+            "ips": sorted(ips_seen),
+            "puertos_abiertos": all_ports,
+            "servicios": [{k: v for k, v in s.items() if k != "tags"} for s in lix_services],
+            "geolocalizacion": geos,
+            "redes": networks,
+            "subdominios": {
+                "total": len(sub_list) + len(shodan_only_hostnames),
+                "lista": sub_list,
+                "solo_shodan": shodan_only_hostnames,
+                "notables": subs.get("notable", []),
+            },
+        },
+        "tecnologias": {
+            "detecciones": tech_detected,
+            "cves_conocidos": cves,
+            "js_libraries": tech.get("js_libs", []),
+            "meta_generator": tech.get("meta_generator", ""),
+        },
+        "seguridad_web": {
+            "cabeceras": {
+                "puntuacion": headers.get("score", 0),
+                "presentes": headers.get("present", []),
+                "ausentes": headers.get("missing", []),
+                "csp": headers.get("csp", ""),
+                "hsts": headers.get("hsts", ""),
+            },
+            "tls": {
+                "puntuacion": tls_data.get("score", 0),
+                "grado": tls_data.get("tls_grade", ""),
+                "score_tls": tls_data.get("tls_score", 0),
+                "componentes": tls_data.get("tls_components", {}),
+                "certificado": {
+                    "estado": tls_data.get("cert_status", ""),
+                    "emisor": tls_data.get("issuer", ""),
+                    "expira": tls_data.get("expires", ""),
+                    "san": tls_data.get("san", []),
+                },
+                "protocolos_legacy": tls_data.get("legacy_tls", []),
+                "vulnerabilidades": tls_data.get("vulnerabilities", []),
+            },
+            "dns": {
+                "puntuacion": dns.get("score", 0),
+                "spf": dns.get("spf", ""),
+                "dmarc": dns.get("dmarc", ""),
+                "mx": dns.get("mx", []),
+                "ns": dns.get("ns", []),
+                "caa": dns.get("caa", []),
+            },
+            "compliance": {
+                "puntuacion": compliance.get("score", 0),
+                "checks": compliance.get("checks", {}),
+            },
+        },
+        "exposiciones": {
+            "rutas_sensibles": {
+                "puntuacion": sp.get("score", 10),
+                "total_hallazgos": len(sp_findings),
+                "por_severidad": classified_findings,
+            },
+            "leakix": {
+                "puntuacion": lix.get("score", 10),
+                "total_leaks": lix.get("leak_count", 0),
+                "total_servicios": lix.get("service_count", 0),
+                "severidad": lix.get("severity_breakdown", {}),
+                "plugins_detectados": lix.get("plugins_detected", []),
+                "plugin_detalle": lix.get("plugin_details", []),
+                "hallazgos_por_severidad": lix_classified,
+            },
+        },
+        "emails_y_brechas": {
+            "emails_encontrados": {
+                "total": len(all_emails),
+                "lista": all_emails,
+                "fuentes": email_sources,
+            },
+            "brechas": {
+                "puntuacion": breach.get("score", 7),
+                "total_brechas": breach.get("breach_count", 0),
+                "nombres_brechas": breach.get("breaches", []),
+                "emails_afectados": [
+                    {
+                        "email": be.get("email", ""),
+                        "brechas": be.get("breaches", []),
+                        "total": be.get("count", 0),
+                        "fuente": be.get("source", "confirmed"),
+                    }
+                    for be in breached_emails
+                ],
+                "personas_investigadas": breach.get("people_checked", 0),
+                "linkedin_confirmados": breach.get("linkedin_confirmed", []),
+            },
+        },
+    }
+
+    if git_data and git_data.get("exposed"):
+        report["repositorio_git_expuesto"] = {
+            "url": git_data.get("base_url", "") + "/.git/",
+            "head": git_data.get("head_ref", ""),
+            "remote_url": git_data.get("config", {}).get("remote_url", ""),
+            "config_raw": git_data.get("config", {}).get("raw", "")[:1000],
+            "descripcion": git_data.get("description", ""),
+            "archivos": {
+                "total": git_data.get("file_count", len(git_data.get("files", []))),
+                "lista_completa": git_data.get("files", []),
+                "sensibles": git_data.get("sensitive_files", []),
+                "extensiones": git_data.get("file_extensions", {}),
+                "directorios": git_data.get("directories", []),
+            },
+            "refs": git_data.get("refs", []),
+            "commits": git_data.get("log_entries", []),
+            "objects_accesibles": git_data.get("objects_accessible", False),
+            "fetch_head": git_data.get("fetch_head", ""),
+        }
+
+    (evidence_dir / "recon_completo.json").write_text(
+        json.dumps(report, indent=2, ensure_ascii=False, default=str)
+    )
 
 
 def print_summary(results, domain):
@@ -1930,11 +2806,14 @@ def print_summary(results, domain):
         "tls": "TLS/SSL",
         "dns": "DNS/Email (SPF/DMARC)",
         "exposure": "Surface Exposure",
+        "leakix": "Data Exposures (LeakIX)",
         "breach": "Breach History",
         "compliance": "RGPD/LSSI Compliance",
         "misconfig": "Sensitive Files/Misconfig",
     }
     for key, label in labels.items():
+        if key not in scores:
+            continue
         score = scores.get(key, "?")
         bar = "#" * score + "." * (10 - score) if isinstance(score, int) else "?"
         print(f"  {label:.<30} [{bar}] {score}/10")
@@ -1973,9 +2852,21 @@ def print_summary(results, domain):
     if sh.get("vulns"):
         print(f"  Known CVEs: {', '.join(sh['vulns'][:5])}")
 
+    lix = results.get("leakix", {})
+    if lix.get("leak_count", 0) > 0:
+        sev = lix.get("severity_breakdown", {})
+        sev_str = ", ".join(f"{k}: {v}" for k, v in sev.items())
+        print(f"  LeakIX: {lix['leak_count']} leaks ({sev_str})")
+        if lix.get("plugins_detected"):
+            print(f"    Plugins: {', '.join(lix['plugins_detected'][:5])}")
+    elif "LEAKIX_API_KEY" not in os.environ:
+        print(f"  LeakIX: skipped (no API key)")
+
     tech = results.get("tech", {})
     if tech.get("cms"):
         print(f"  CMS: {tech['cms']}")
+    if tech.get("nuclei_detected"):
+        print(f"  Nuclei tech ({len(tech['nuclei_detected'])}): {', '.join(tech['nuclei_detected'][:10])}")
 
     em = results.get("emails", {})
     website_emails = [e for e, s in em.get("sources", {}).items() if "website" in str(s)]
