@@ -45,7 +45,7 @@ AREA_LABELS = {
     "tls": "SSL/TLS",
     "dns": "Email (SPF/DMARC)",
     "exposure": "Superficie Expuesta",
-    "leakix": "Exposiciones (LeakIX)",
+    "leakix": "Exposiciones confirmadas",
     "breach": "Filtraciones",
     "compliance": "Cumplimiento Legal",
     "misconfig": "Archivos Sensibles",
@@ -361,6 +361,67 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
                 sp_body += f'<p><strong>Historial de commits accesible:</strong></p><table><thead><tr><th>Commit</th><th>Autor</th><th>Mensaje</th></tr></thead><tbody>{log_rows}</tbody></table>'
             if sp_git_data.get("objects_accessible"):
                 sp_body += '<p style="color:#ef4444"><strong>&#9888; El directorio <code>.git/objects/</code> tambi&eacute;n es accesible</strong>, lo que permite reconstruir el c&oacute;digo fuente completo.</p>'
+            git_creds = sp_git_data.get("credentials", {})
+            if git_creds:
+                sp_body += (
+                    f'<p style="color:#dc2626"><strong>&#9888; Credenciales en .git/config:</strong> '
+                    f'Plataforma <code>{escape(git_creds.get("platform", ""))}</code>, '
+                    f'usuario <code>{escape(git_creds.get("user", ""))}</code>, '
+                    f'token <code>{escape(git_creds.get("token_redacted", ""))}</code></p>'
+                )
+            platform_enum = sp_git_data.get("platform_enumeration", {})
+            if platform_enum and platform_enum.get("token_valid"):
+                pe_platform = escape(platform_enum.get("platform", ""))
+                pe_user = platform_enum.get("user_info", {})
+                sp_body += f'<p style="color:#dc2626;font-weight:bold">&#128274; Token v&aacute;lido en {pe_platform}</p>'
+                if pe_user:
+                    user_parts = [f'{k}: <code>{escape(str(v))}</code>' for k, v in pe_user.items() if v]
+                    sp_body += f'<p><strong>Usuario autenticado:</strong> {", ".join(user_parts)}</p>'
+                if platform_enum.get("token_scopes"):
+                    sp_body += f'<p><strong>Scopes del token:</strong> <code>{escape(platform_enum["token_scopes"])}</code></p>'
+                pe_orgs = platform_enum.get("orgs", [])
+                if pe_orgs:
+                    org_items = "".join(f"<li><code>{escape(o)}</code></li>" for o in pe_orgs[:10])
+                    sp_body += f'<p><strong>Organizaciones/grupos:</strong></p><ul style="margin:4px 0 10px 18px">{org_items}</ul>'
+                pe_repos = platform_enum.get("repos", [])
+                if pe_repos:
+                    private_repos = [r for r in pe_repos if r.get("private")]
+                    public_repos = [r for r in pe_repos if not r.get("private")]
+                    if private_repos:
+                        priv_items = "".join(f'<li><code style="color:#dc2626">{escape(r.get("name", ""))}</code> &#128274;</li>' for r in private_repos[:15])
+                        sp_body += f'<p style="color:#dc2626"><strong>{len(private_repos)} repositorios PRIVADOS accesibles:</strong></p><ul style="margin:4px 0 10px 18px">{priv_items}</ul>'
+                    if public_repos:
+                        pub_items = "".join(f"<li><code>{escape(r.get('name', ''))}</code></li>" for r in public_repos[:10])
+                        sp_body += f'<p><strong>{len(public_repos)} repositorios p&uacute;blicos:</strong></p><ul style="margin:4px 0 10px 18px">{pub_items}</ul>'
+            dev_emails = sp_git_data.get("developer_emails", [])
+            if dev_emails:
+                email_items = "".join(f"<li><code>{escape(e)}</code></li>" for e in dev_emails[:15])
+                sp_body += f'<p><strong>Emails de desarrolladores</strong> (extra&iacute;dos del historial Git, &uacute;tiles para verificar en brechas de datos):</p><ul style="margin:4px 0 10px 18px">{email_items}</ul>'
+            remote_probe = sp_git_data.get("remote_probe", {})
+            if remote_probe and remote_probe.get("platform"):
+                rp_info = remote_probe.get("repo_info", {})
+                rp_platform = escape(remote_probe.get("platform", ""))
+                if remote_probe.get("public"):
+                    sp_body += f'<p><strong>Repositorio remoto ({rp_platform}):</strong> <span style="color:#dc2626">P&Uacute;BLICO</span></p>'
+                    rp_details = []
+                    for k in ("full_name", "description", "language", "owner", "default_branch"):
+                        v = rp_info.get(k)
+                        if v:
+                            rp_details.append(f"<li><strong>{escape(k)}:</strong> <code>{escape(str(v))}</code></li>")
+                    if rp_details:
+                        sp_body += f'<ul style="margin:4px 0 10px 18px">{"".join(rp_details)}</ul>'
+                    rp_emails = rp_info.get("contributor_emails", [])
+                    if rp_emails:
+                        rpe_items = "".join(f"<li><code>{escape(e)}</code></li>" for e in rp_emails[:10])
+                        sp_body += f'<p><strong>Emails de contribuidores (commits p&uacute;blicos):</strong></p><ul style="margin:4px 0 10px 18px">{rpe_items}</ul>'
+                else:
+                    rp_status = rp_info.get("status", "private_or_deleted")
+                    sp_body += (
+                        f'<p><strong>Repositorio remoto ({rp_platform}):</strong> '
+                        f'<code>{escape(remote_probe.get("url", ""))}</code> &mdash; '
+                        f'<span style="color:#d97706">{escape(rp_status)}</span> '
+                        f'(el c&oacute;digo expuesto via .git NO deber&iacute;a ser accesible p&uacute;blicamente)</p>'
+                    )
         else:
             sp_body = f'<p>Recurso accesible en: <code>{escape(spf.get("url", ""))}</code></p>'
             extracted = spf.get("extracted", [])
@@ -660,13 +721,59 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
             plugin_table = f"""<table class="mini-table"><thead><tr>
                 <th>Exposici&oacute;n detectada</th><th>Severidad</th><th>Incidencias</th>
                 </tr></thead><tbody>{plugin_rows}</tbody></table>""" if plugin_rows else ""
+            leak_details_html = ""
+            for lk in lix_leaks:
+                lk_plugin = lk.get("plugin", "")
+                lk_summary = (lk.get("summary") or "").strip()
+                lk_host = lk.get("host", "")
+                lk_sev = lk.get("severity", "info")
+                if not lk_plugin and not lk_summary:
+                    continue
+                if lk_plugin == "GitConfigHttpPlugin" and sp_has_git:
+                    continue
+                pd_match = next((p for p in lix_plugin_details if p.get("plugin") == lk_plugin), None)
+                lk_label = pd_match.get("label", lk_plugin) if pd_match else (lk_plugin or "Servicio")
+                lk_sc = sev_colors.get(lk_sev, "#94a3b8")
+                lk_header = f'<strong style="color:{lk_sc}">[{escape(lk_sev)}]</strong> {escape(lk_label)}'
+                if lk_host:
+                    lk_header += f' &mdash; <code>{escape(lk_host)}</code>'
+                lk_port = lk.get("port", "")
+                if lk_port:
+                    lk_header += f':{escape(str(lk_port))}'
+                lk_body = f"<p>{lk_header}</p>"
+                if lk_summary:
+                    import re as _re
+                    redacted_summary = _re.sub(
+                        r'(https?://)([^:]+):([^@]{4})[^@]*([^@]{4})@',
+                        lambda m: f'{m.group(1)}{m.group(2)}:{m.group(3)}…{m.group(4)}@',
+                        lk_summary,
+                    )
+                    lines = redacted_summary.strip().splitlines()
+                    if len(lines) > 15:
+                        lines = lines[:15] + [f"… ({len(lines) - 15} líneas más)"]
+                    summary_escaped = "<br>".join(escape(l) for l in lines)
+                    lk_body += f'<pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:8px;font-size:8pt;overflow:hidden;white-space:pre-wrap;word-break:break-all;max-height:200px">{summary_escaped}</pre>'
+                lk_dataset = lk.get("dataset", {})
+                ds_parts = []
+                if lk_dataset.get("rows"):
+                    ds_parts.append(f"{lk_dataset['rows']} filas")
+                if lk_dataset.get("files"):
+                    ds_parts.append(f"{lk_dataset['files']} archivos")
+                if lk_dataset.get("size"):
+                    size_mb = lk_dataset["size"] / (1024 * 1024)
+                    ds_parts.append(f"{size_mb:.1f} MB")
+                if ds_parts:
+                    lk_body += f'<p style="font-size:8pt;color:#64748b">Datos: {", ".join(ds_parts)}</p>'
+                leak_details_html += lk_body
+            if leak_details_html:
+                leak_details_html = f'<div style="margin:12px 0;border-left:3px solid #e2e8f0;padding-left:12px">{leak_details_html}</div>'
             findings_html += f"""
             <div class="finding-card">
               <h3><span class="badge sev-{sev}">{sev_label}</span> &nbsp;Exposiciones de datos confirmadas</h3>
               <p>Motores de b&uacute;squeda especializados en seguridad han indexado
               <strong>{len(lix_leaks)} exposiciones confirmadas</strong> en la infraestructura
               del dominio: {sev_items}.</p>
-              {plugin_table}{host_detail}
+              {plugin_table}{leak_details_html}{host_detail}
               <p><span class="risk-label">Riesgo:</span> Estas exposiciones no son te&oacute;ricas &mdash;
               han sido indexadas por motores p&uacute;blicos, lo que significa que cualquier persona puede
               acceder a la informaci&oacute;n expuesta. Seg&uacute;n el RGPD, la exposici&oacute;n no controlada
@@ -842,7 +949,13 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
     if sp_findings or sp_cats_in_lix:
         sp_crit_cats = {f.get("category") for f in sp_findings if f.get("severity") == "critica"}
         if "git_exposed" in sp_cats:
-            recs_high.append("Bloquear el acceso p&uacute;blico al directorio <code>.git</code> y rotar cualquier credencial que haya estado expuesta en el repositorio")
+            git_has_creds = any(
+                f.get("git_data", {}).get("credentials") for f in sp_findings if f.get("category") == "git_exposed"
+            )
+            if git_has_creds:
+                recs_high.append("Bloquear el acceso al directorio <code>.git</code>, <strong>revocar inmediatamente el token/credencial expuesto</strong> en la plataforma de repositorios, y auditar el acceso realizado con dicho token")
+            else:
+                recs_high.append("Bloquear el acceso p&uacute;blico al directorio <code>.git</code> y rotar cualquier credencial que haya estado expuesta en el repositorio")
         if "env_file" in sp_cats:
             recs_high.append("Eliminar o bloquear el acceso al archivo <code>.env</code> y rotar todas las credenciales y claves API contenidas")
         if "svn" in sp_cats:

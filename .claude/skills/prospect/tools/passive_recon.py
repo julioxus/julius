@@ -815,18 +815,61 @@ def check_leakix(domain):
         )
     )
 
+    cred_patterns = re.compile(
+        r'[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]{8,}@'
+        r'|PRIVATE.TOKEN|Bearer\s+[a-zA-Z0-9_-]{10,}'
+        r'|password\s*[:=]\s*\S{6,}'
+        r'|DB_PASSWORD|API_KEY|SECRET_KEY|MYSQL_PASSWORD|POSTGRES_PASSWORD'
+    )
+    has_leaked_creds = False
+    for lk in results["leaks"]:
+        summary = lk.get("summary", "")
+        if summary and cred_patterns.search(summary):
+            has_leaked_creds = True
+            break
+
     crit = filtered_sev.get("critical", 0)
     high = filtered_sev.get("high", 0)
     medium = filtered_sev.get("medium", 0)
-    if crit > 0:
-        results["score"] -= min(crit * 3, 6)
-    if high > 0:
-        results["score"] -= min(high * 2, 4)
-    if medium > 0:
-        results["score"] -= min(medium, 2)
-    results["score"] = max(1, results["score"])
+    if has_leaked_creds:
+        results["score"] = 1
+        results["credential_leak"] = True
+    else:
+        if crit > 0:
+            results["score"] -= min(crit * 3, 6)
+        if high > 0:
+            results["score"] -= min(high * 2, 4)
+        if medium > 0:
+            results["score"] -= min(medium, 2)
+        results["score"] = max(1, results["score"])
 
     return results
+
+
+def _domain_variants(domain):
+    """Generate TLD variants for a domain (e.g. example.es → example.com)."""
+    tld_groups = [
+        [".es", ".com", ".net", ".org"],
+        [".com", ".es", ".net", ".org"],
+        [".co.uk", ".com", ".uk"],
+        [".de", ".com"],
+        [".fr", ".com"],
+        [".it", ".com"],
+        [".pt", ".com"],
+        [".nl", ".com"],
+    ]
+    variants = []
+    domain_lower = domain.lower()
+    for group in tld_groups:
+        for tld in group:
+            if domain_lower.endswith(tld):
+                base_name = domain_lower[: -len(tld)]
+                for alt_tld in group:
+                    alt = base_name + alt_tld
+                    if alt != domain_lower:
+                        variants.append(alt)
+                return variants
+    return variants
 
 
 def check_sensitive_paths(domain):
@@ -841,6 +884,14 @@ def check_sensitive_paths(domain):
             break
     if not base_urls:
         base_urls = [f"https://{domain}"]
+
+    variant_bases = []
+    for alt in _domain_variants(domain)[:3]:
+        for scheme in ["https", "http"]:
+            test = run_cmd(f'curl -sk -o /dev/null -w "%{{http_code}}" -m 5 {scheme}://{alt}/')
+            if test.strip() in ("200", "301", "302", "403"):
+                variant_bases.append((alt, f"{scheme}://{alt}"))
+                break
 
     base = base_urls[0]
 
@@ -1011,6 +1062,78 @@ def check_sensitive_paths(domain):
         results["raw"] += f"--- git_exposed: {git_result['url']} ---\n"
         results["git_exposed"] = git_result.get("git_data", {})
 
+    # Check domain variants (.es → .com, etc.)
+    found_cats = {f["category"] for f in results["findings"]}
+    for alt_domain, alt_base in variant_bases:
+        results["raw"] += f"\n=== Variant domain: {alt_domain} ===\n"
+
+        def _check_path_variant(path_info, _alt_base=alt_base):
+            for path in path_info["paths"]:
+                url = f"{_alt_base}{path}"
+                raw = run_cmd(
+                    f'curl -sk -o /dev/null -w "%{{http_code}}|%{{size_download}}|%{{content_type}}" '
+                    f'-H "User-Agent: Mozilla/5.0" "{url}" -m 10'
+                )
+                parts = raw.strip().split("|")
+                if len(parts) < 3 or parts[0] != "200":
+                    continue
+                size = int(parts[1]) if parts[1].isdigit() else 0
+                content_type = parts[2] if len(parts) > 2 else ""
+                if size < 20 or size > 50_000_000:
+                    continue
+                body = run_cmd(f'curl -sk -H "User-Agent: Mozilla/5.0" "{url}" -m 15')
+                if not body or "[TIMEOUT]" in body or "[ERROR" in body:
+                    continue
+                if path_info["category"] not in ("backup_files",):
+                    if "<!doctype" in body.lower()[:100] or "<head>" in body.lower()[:500]:
+                        if path_info["category"] != "phpinfo" or "PHP Version" not in body:
+                            continue
+                try:
+                    if path_info["validate"](body, content_type):
+                        extracted = path_info.get("extract", lambda b: [])(body) if "extract" in path_info else []
+                        return {
+                            "category": path_info["category"],
+                            "path": path,
+                            "url": url,
+                            "title": f'{path_info["title"]} ({alt_domain})',
+                            "severity": path_info["severity"],
+                            "risk": path_info["risk"],
+                            "size": size,
+                            "content_type": content_type,
+                            "extracted": extracted[:30] if extracted else [],
+                            "body_preview": body[:500],
+                            "variant_domain": alt_domain,
+                        }
+                except Exception:
+                    continue
+            return None
+
+        variant_checks = [c for c in CHECKS if c["category"] not in found_cats]
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            vfutures = {executor.submit(_check_path_variant, check): check["category"] for check in variant_checks}
+            for future in as_completed(vfutures):
+                cat = vfutures[future]
+                try:
+                    result = future.result()
+                    if result:
+                        results["findings"].append(result)
+                        found_cats.add(cat)
+                        results["raw"] += f"--- {cat} (variant {alt_domain}): {result['url']} ---\n"
+                except Exception:
+                    pass
+
+        if "git_exposed" not in found_cats:
+            git_variant = _check_git_exposed(alt_base, alt_domain)
+            if git_variant:
+                git_variant["title"] = f'{git_variant["title"]} ({alt_domain})'
+                git_variant["variant_domain"] = alt_domain
+                results["findings"].append(git_variant)
+                found_cats.add("git_exposed")
+                results["raw"] += f"--- git_exposed (variant {alt_domain}): {git_variant['url']} ---\n"
+                results["git_exposed"] = git_variant.get("git_data", {})
+
+    results["variant_domains"] = [d for d, _ in variant_bases]
+
     crit_count = sum(1 for f in results["findings"] if f["severity"] == "critica")
     high_count = sum(1 for f in results["findings"] if f["severity"] == "alta")
     med_count = sum(1 for f in results["findings"] if f["severity"] == "media")
@@ -1061,6 +1184,388 @@ def _parse_git_index(base_url):
         return files
     except Exception:
         return []
+
+
+def _extract_git_credentials(remote_url):
+    """Parse user:token from git remote URL. Returns dict with platform info or None."""
+    if not remote_url:
+        return None
+    m = re.match(
+        r'https?://([^:]+):([^@]+)@([^/]+)/(.+?)(?:\.git)?$',
+        remote_url.strip(),
+    )
+    if not m:
+        return None
+    user, token, host, repo_path = m.group(1), m.group(2), m.group(3), m.group(4)
+    host_lower = host.lower()
+    if "github.com" in host_lower:
+        platform = "github"
+    elif "gitlab.com" in host_lower:
+        platform = "gitlab"
+    elif "bitbucket.org" in host_lower:
+        platform = "bitbucket"
+    else:
+        platform = "self-hosted"
+    return {
+        "platform": platform,
+        "host": host,
+        "user": user,
+        "token": token,
+        "token_redacted": token[:4] + "…" + token[-4:] if len(token) > 10 else "***",
+        "repo_path": repo_path,
+    }
+
+
+def _enumerate_git_platform(creds):
+    """Use extracted credentials to enumerate the platform. Returns enrichment dict."""
+    if not creds:
+        return {}
+    platform = creds["platform"]
+    host = creds["host"]
+    user = creds["user"]
+    token = creds["token"]
+    repo_path = creds["repo_path"]
+    enrichment = {"platform": platform, "host": host, "repos": [], "orgs": [],
+                  "token_scopes": "", "token_valid": False, "user_info": {}}
+
+    if platform == "github":
+        scopes = run_cmd(
+            f'curl -s -o /dev/null -w "%{{http_code}}" '
+            f'-H "Authorization: token {token}" '
+            f'-H "User-Agent: Mozilla/5.0" '
+            f'-D /tmp/.prospect_gh_headers '
+            f'"https://api.github.com/user" -m 10'
+        )
+        if scopes.strip() == "200":
+            enrichment["token_valid"] = True
+            headers_raw = run_cmd("cat /tmp/.prospect_gh_headers 2>/dev/null")
+            scope_match = re.search(r'x-oauth-scopes:\s*(.+)', headers_raw, re.IGNORECASE)
+            if scope_match:
+                enrichment["token_scopes"] = scope_match.group(1).strip()
+            user_raw = run_cmd(
+                f'curl -s -H "Authorization: token {token}" '
+                f'-H "User-Agent: Mozilla/5.0" '
+                f'"https://api.github.com/user" -m 10'
+            )
+            try:
+                u = json.loads(user_raw)
+                enrichment["user_info"] = {
+                    "login": u.get("login", ""),
+                    "name": u.get("name", ""),
+                    "email": u.get("email", ""),
+                    "company": u.get("company", ""),
+                    "type": u.get("type", ""),
+                }
+            except (json.JSONDecodeError, TypeError):
+                pass
+            repos_raw = run_cmd(
+                f'curl -s -H "Authorization: token {token}" '
+                f'-H "User-Agent: Mozilla/5.0" '
+                f'"https://api.github.com/user/repos?per_page=50&sort=updated" -m 15'
+            )
+            try:
+                repos = json.loads(repos_raw)
+                if isinstance(repos, list):
+                    enrichment["repos"] = [
+                        {"name": r.get("full_name", ""), "private": r.get("private", False),
+                         "url": r.get("html_url", "")}
+                        for r in repos[:30]
+                    ]
+            except (json.JSONDecodeError, TypeError):
+                pass
+            orgs_raw = run_cmd(
+                f'curl -s -H "Authorization: token {token}" '
+                f'-H "User-Agent: Mozilla/5.0" '
+                f'"https://api.github.com/user/orgs" -m 10'
+            )
+            try:
+                orgs = json.loads(orgs_raw)
+                if isinstance(orgs, list):
+                    enrichment["orgs"] = [o.get("login", "") for o in orgs[:20]]
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    elif platform == "gitlab":
+        user_raw = run_cmd(
+            f'curl -s -H "PRIVATE-TOKEN: {token}" '
+            f'"https://{host}/api/v4/user" -m 10'
+        )
+        try:
+            u = json.loads(user_raw)
+            if u.get("id"):
+                enrichment["token_valid"] = True
+                enrichment["user_info"] = {
+                    "username": u.get("username", ""),
+                    "name": u.get("name", ""),
+                    "email": u.get("email", ""),
+                    "is_admin": u.get("is_admin", False),
+                }
+        except (json.JSONDecodeError, TypeError):
+            pass
+        if enrichment["token_valid"]:
+            projects_raw = run_cmd(
+                f'curl -s -H "PRIVATE-TOKEN: {token}" '
+                f'"https://{host}/api/v4/projects?membership=true&per_page=50&order_by=updated_at" -m 15'
+            )
+            try:
+                projects = json.loads(projects_raw)
+                if isinstance(projects, list):
+                    enrichment["repos"] = [
+                        {"name": p.get("path_with_namespace", ""),
+                         "private": p.get("visibility", "") != "public",
+                         "url": p.get("web_url", "")}
+                        for p in projects[:30]
+                    ]
+            except (json.JSONDecodeError, TypeError):
+                pass
+            groups_raw = run_cmd(
+                f'curl -s -H "PRIVATE-TOKEN: {token}" '
+                f'"https://{host}/api/v4/groups" -m 10'
+            )
+            try:
+                groups = json.loads(groups_raw)
+                if isinstance(groups, list):
+                    enrichment["orgs"] = [g.get("full_path", "") for g in groups[:20]]
+            except (json.JSONDecodeError, TypeError):
+                pass
+            pat_raw = run_cmd(
+                f'curl -s -H "PRIVATE-TOKEN: {token}" '
+                f'"https://{host}/api/v4/personal_access_tokens/self" -m 10'
+            )
+            try:
+                pat = json.loads(pat_raw)
+                if pat.get("scopes"):
+                    enrichment["token_scopes"] = ", ".join(pat["scopes"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    elif platform == "bitbucket":
+        user_raw = run_cmd(
+            f'curl -s -u "{user}:{token}" '
+            f'"https://api.bitbucket.org/2.0/user" -m 10'
+        )
+        try:
+            u = json.loads(user_raw)
+            if u.get("uuid"):
+                enrichment["token_valid"] = True
+                enrichment["user_info"] = {
+                    "username": u.get("username", u.get("display_name", "")),
+                    "display_name": u.get("display_name", ""),
+                    "uuid": u.get("uuid", ""),
+                }
+        except (json.JSONDecodeError, TypeError):
+            pass
+        if enrichment["token_valid"]:
+            workspaces_raw = run_cmd(
+                f'curl -s -u "{user}:{token}" '
+                f'"https://api.bitbucket.org/2.0/workspaces?pagelen=25" -m 10'
+            )
+            try:
+                ws = json.loads(workspaces_raw)
+                if ws.get("values"):
+                    enrichment["orgs"] = [w.get("slug", "") for w in ws["values"][:20]]
+            except (json.JSONDecodeError, TypeError):
+                pass
+            for workspace in enrichment["orgs"][:5]:
+                repos_raw = run_cmd(
+                    f'curl -s -u "{user}:{token}" '
+                    f'"https://api.bitbucket.org/2.0/repositories/{workspace}?pagelen=50&sort=-updated_on" -m 15'
+                )
+                try:
+                    repos = json.loads(repos_raw)
+                    if repos.get("values"):
+                        for r in repos["values"][:20]:
+                            enrichment["repos"].append({
+                                "name": r.get("full_name", ""),
+                                "private": r.get("is_private", False),
+                                "url": r.get("links", {}).get("html", {}).get("href", ""),
+                            })
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+    else:
+        # Self-hosted: probe for GitLab API first, then Gitea
+        gl_raw = run_cmd(
+            f'curl -s -H "PRIVATE-TOKEN: {token}" '
+            f'"https://{host}/api/v4/user" -m 10'
+        )
+        try:
+            u = json.loads(gl_raw)
+            if u.get("id"):
+                enrichment["token_valid"] = True
+                enrichment["platform"] = "gitlab-self-hosted"
+                enrichment["user_info"] = {
+                    "username": u.get("username", ""),
+                    "name": u.get("name", ""),
+                    "email": u.get("email", ""),
+                    "is_admin": u.get("is_admin", False),
+                }
+                projects_raw = run_cmd(
+                    f'curl -s -H "PRIVATE-TOKEN: {token}" '
+                    f'"https://{host}/api/v4/projects?membership=true&per_page=50" -m 15'
+                )
+                try:
+                    projects = json.loads(projects_raw)
+                    if isinstance(projects, list):
+                        enrichment["repos"] = [
+                            {"name": p.get("path_with_namespace", ""),
+                             "private": p.get("visibility", "") != "public",
+                             "url": p.get("web_url", "")}
+                            for p in projects[:30]
+                        ]
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        except (json.JSONDecodeError, TypeError):
+            pass
+        if not enrichment["token_valid"]:
+            gitea_raw = run_cmd(
+                f'curl -s -H "Authorization: token {token}" '
+                f'"https://{host}/api/v1/user" -m 10'
+            )
+            try:
+                u = json.loads(gitea_raw)
+                if u.get("id"):
+                    enrichment["token_valid"] = True
+                    enrichment["platform"] = "gitea"
+                    enrichment["user_info"] = {
+                        "username": u.get("login", ""),
+                        "name": u.get("full_name", ""),
+                        "email": u.get("email", ""),
+                        "is_admin": u.get("is_site_admin", False),
+                    }
+                    repos_raw = run_cmd(
+                        f'curl -s -H "Authorization: token {token}" '
+                        f'"https://{host}/api/v1/user/repos?limit=50" -m 15'
+                    )
+                    try:
+                        repos = json.loads(repos_raw)
+                        if isinstance(repos, list):
+                            enrichment["repos"] = [
+                                {"name": r.get("full_name", ""),
+                                 "private": r.get("private", False),
+                                 "url": r.get("html_url", "")}
+                                for r in repos[:30]
+                            ]
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    return enrichment
+
+
+def _probe_public_remote(remote_url):
+    """Probe a remote URL without credentials to check public visibility and extract metadata."""
+    result = {"url": remote_url, "public": False, "platform": None, "repo_info": {}}
+    remote_url = remote_url.strip().rstrip(".git")
+
+    gh = re.match(r'https?://github\.com/([^/]+)/([^/]+)', remote_url)
+    gl = re.match(r'https?://gitlab\.com/([^/]+(?:/[^/]+)*)', remote_url)
+    bb = re.match(r'https?://bitbucket\.org/([^/]+)/([^/]+)', remote_url)
+
+    if gh:
+        result["platform"] = "github"
+        api_url = f"https://api.github.com/repos/{gh.group(1)}/{gh.group(2)}"
+        raw = run_cmd(f'curl -s -H "User-Agent: Mozilla/5.0" "{api_url}" -m 10')
+        try:
+            data = json.loads(raw)
+            if data.get("id"):
+                result["public"] = True
+                result["repo_info"] = {
+                    "full_name": data.get("full_name", ""),
+                    "description": data.get("description", ""),
+                    "private": data.get("private", False),
+                    "owner": data.get("owner", {}).get("login", ""),
+                    "owner_type": data.get("owner", {}).get("type", ""),
+                    "default_branch": data.get("default_branch", ""),
+                    "language": data.get("language", ""),
+                    "created_at": data.get("created_at", ""),
+                    "updated_at": data.get("updated_at", ""),
+                    "stars": data.get("stargazers_count", 0),
+                }
+                commits_raw = run_cmd(
+                    f'curl -s -H "User-Agent: Mozilla/5.0" '
+                    f'"{api_url}/commits?per_page=10" -m 10'
+                )
+                try:
+                    commits = json.loads(commits_raw)
+                    if isinstance(commits, list):
+                        emails = set()
+                        for c in commits:
+                            for field in ("author", "committer"):
+                                info = (c.get("commit", {}).get(field) or {})
+                                email = info.get("email", "")
+                                if email and "@" in email and "noreply" not in email.lower():
+                                    emails.add(email.lower())
+                        if emails:
+                            result["repo_info"]["contributor_emails"] = sorted(emails)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            else:
+                result["repo_info"]["status"] = "private_or_deleted"
+        except (json.JSONDecodeError, TypeError):
+            result["repo_info"]["status"] = "unreachable"
+
+    elif gl:
+        result["platform"] = "gitlab"
+        project_path = gl.group(1).replace("/", "%2F")
+        raw = run_cmd(
+            f'curl -s "https://gitlab.com/api/v4/projects/{project_path}" -m 10'
+        )
+        try:
+            data = json.loads(raw)
+            if data.get("id"):
+                result["public"] = True
+                result["repo_info"] = {
+                    "full_name": data.get("path_with_namespace", ""),
+                    "description": data.get("description", ""),
+                    "visibility": data.get("visibility", ""),
+                    "namespace": data.get("namespace", {}).get("full_path", ""),
+                    "default_branch": data.get("default_branch", ""),
+                    "created_at": data.get("created_at", ""),
+                    "last_activity_at": data.get("last_activity_at", ""),
+                    "stars": data.get("star_count", 0),
+                }
+            else:
+                result["repo_info"]["status"] = "private_or_deleted"
+        except (json.JSONDecodeError, TypeError):
+            result["repo_info"]["status"] = "unreachable"
+
+    elif bb:
+        result["platform"] = "bitbucket"
+        raw = run_cmd(
+            f'curl -s "https://api.bitbucket.org/2.0/repositories/{bb.group(1)}/{bb.group(2)}" -m 10'
+        )
+        try:
+            data = json.loads(raw)
+            if data.get("uuid"):
+                result["public"] = True
+                result["repo_info"] = {
+                    "full_name": data.get("full_name", ""),
+                    "description": data.get("description", ""),
+                    "is_private": data.get("is_private", False),
+                    "owner": data.get("owner", {}).get("display_name", ""),
+                    "language": data.get("language", ""),
+                    "created_on": data.get("created_on", ""),
+                    "updated_on": data.get("updated_on", ""),
+                }
+            else:
+                result["repo_info"]["status"] = "private_or_deleted"
+        except (json.JSONDecodeError, TypeError):
+            result["repo_info"]["status"] = "unreachable"
+
+    return result
+
+
+def _extract_developer_emails(log_entries):
+    """Extract unique developer emails from git log author fields."""
+    emails = set()
+    for entry in log_entries:
+        author = entry.get("author", "")
+        m = re.search(r'<([^>]+@[^>]+)>', author)
+        if m:
+            emails.add(m.group(1).lower())
+    return sorted(emails)
 
 
 def _check_git_exposed(base_url, domain):
@@ -1170,13 +1675,46 @@ def _check_git_exposed(base_url, domain):
             git_data["directories"] = sorted(dirs)[:50]
             git_data["file_count"] = len(git_data["files"])
 
+        developer_emails = _extract_developer_emails(git_data.get("log_entries", []))
+        if developer_emails:
+            git_data["developer_emails"] = developer_emails
+
+        remote_url = git_data.get("config", {}).get("remote_url", "")
+        creds = _extract_git_credentials(remote_url)
+        if creds:
+            git_data["credentials"] = {
+                "platform": creds["platform"],
+                "host": creds["host"],
+                "user": creds["user"],
+                "token_redacted": creds["token_redacted"],
+                "repo_path": creds["repo_path"],
+            }
+            enrichment = _enumerate_git_platform(creds)
+            if enrichment.get("token_valid"):
+                git_data["platform_enumeration"] = enrichment
+        elif remote_url:
+            git_data["remote_probe"] = _probe_public_remote(remote_url)
+
+        severity = "alta"
+        justification = "Se ha verificado el acceso directo al archivo .git/HEAD, confirmando que el contenido del repositorio es descargable. Un atacante puede reconstruir el código fuente completo."
+        if creds and git_data.get("platform_enumeration", {}).get("token_valid"):
+            severity = "critica"
+            n_repos = len(git_data["platform_enumeration"].get("repos", []))
+            n_private = sum(1 for r in git_data["platform_enumeration"].get("repos", []) if r.get("private"))
+            justification = (
+                f"Credenciales válidas ({creds['platform']}) expuestas en .git/config. "
+                f"Token activo permite acceso a {n_repos} repositorios"
+                + (f" ({n_private} privados)" if n_private else "")
+                + ". Un atacante puede acceder al código fuente, secretos, e infraestructura de la organización."
+            )
+
         return {
             "category": "git_exposed",
             "path": "/.git/HEAD",
             "url": f"{base}/.git/",
             "title": "Repositorio Git (.git) expuesto públicamente",
-            "severity": "alta",
-            "justification": "Se ha verificado el acceso directo al archivo .git/HEAD, confirmando que el contenido del repositorio es descargable. Un atacante puede reconstruir el código fuente completo.",
+            "severity": severity,
+            "justification": justification,
             "risk": "La exposición del directorio .git permite a cualquier atacante descargar el código fuente completo de la aplicación, incluyendo posibles credenciales, claves API, configuraciones internas y lógica de negocio.",
             "size": 0,
             "content_type": "",
@@ -2226,6 +2764,23 @@ def run_recon(domain, output_dir, company="", sector=""):
 
     email_data = results.get("emails", {})
     confirmed_emails = email_data.get("emails", [])
+
+    sp_data = results.get("sensitive_paths", {})
+    git_dev_emails = sp_data.get("git_exposed", {}).get("developer_emails", [])
+    if not git_dev_emails:
+        for f in sp_data.get("findings", []):
+            if f.get("category") == "git_exposed":
+                git_dev_emails = f.get("git_data", {}).get("developer_emails", [])
+                break
+    if git_dev_emails:
+        already = set(e.lower() for e in confirmed_emails)
+        for ge in git_dev_emails:
+            if ge.lower() not in already:
+                confirmed_emails.append(ge)
+                already.add(ge.lower())
+                email_data.setdefault("sources", {})[ge] = ["git-log"]
+        email_data["emails"] = confirmed_emails
+
     try:
         results["breach"] = check_breaches(domain, confirmed_emails[:25])
     except Exception as e:
@@ -2413,16 +2968,24 @@ def run_recon(domain, output_dir, company="", sector=""):
 
     if lix_has_data:
         weights = {
-            "headers": 0.05, "tech": 0.10, "tls": 0.05, "dns": 0.10,
-            "exposure": 0.10, "leakix": 0.10, "breach": 0.10,
-            "compliance": 0.15, "misconfig": 0.25,
+            "headers": 0.03, "tech": 0.08, "tls": 0.04, "dns": 0.08,
+            "exposure": 0.07, "leakix": 0.25, "breach": 0.10,
+            "compliance": 0.10, "misconfig": 0.25,
         }
     else:
         weights = {
-            "headers": 0.05, "tech": 0.15, "tls": 0.05, "dns": 0.10,
-            "exposure": 0.10, "breach": 0.15, "compliance": 0.15, "misconfig": 0.25,
+            "headers": 0.03, "tech": 0.10, "tls": 0.05, "dns": 0.10,
+            "exposure": 0.07, "breach": 0.15, "compliance": 0.15, "misconfig": 0.35,
         }
     total = sum(scores[k] * weights[k] * 10 for k in scores)
+
+    lix_cred_leak = lix.get("credential_leak", False)
+    sp_cred_leak = any(
+        f.get("git_data", {}).get("platform_enumeration", {}).get("token_valid")
+        for f in results.get("sensitive_paths", {}).get("findings", [])
+    )
+    if lix_cred_leak or sp_cred_leak:
+        total = min(total, 35)
 
     if total >= 90:
         grade = "A"
@@ -2582,7 +3145,7 @@ def _save_recon_completo(results, domain, company, sector, scoring, evidence_dir
             "datos_extraidos": f.get("extracted", []),
         }
         if f.get("category") == "git_exposed" and git_data:
-            entry["repositorio"] = {
+            repo_entry = {
                 "head": git_data.get("head_ref", ""),
                 "remote_url": git_data.get("config", {}).get("remote_url", ""),
                 "descripcion": git_data.get("description", ""),
@@ -2596,6 +3159,32 @@ def _save_recon_completo(results, domain, company, sector, scoring, evidence_dir
                 "objects_accesibles": git_data.get("objects_accessible", False),
                 "fetch_head": git_data.get("fetch_head", ""),
             }
+            if git_data.get("developer_emails"):
+                repo_entry["emails_desarrolladores"] = git_data["developer_emails"]
+            if git_data.get("credentials"):
+                creds_safe = dict(git_data["credentials"])
+                creds_safe.pop("token", None)
+                repo_entry["credenciales_expuestas"] = creds_safe
+            if git_data.get("platform_enumeration"):
+                pe = git_data["platform_enumeration"]
+                repo_entry["enumeracion_plataforma"] = {
+                    "plataforma": pe.get("platform", ""),
+                    "token_valido": pe.get("token_valid", False),
+                    "scopes": pe.get("token_scopes", ""),
+                    "usuario": pe.get("user_info", {}),
+                    "organizaciones": pe.get("orgs", []),
+                    "repositorios_total": len(pe.get("repos", [])),
+                    "repositorios_privados": sum(1 for r in pe.get("repos", []) if r.get("private")),
+                    "repositorios": pe.get("repos", [])[:15],
+                }
+            if git_data.get("remote_probe"):
+                rp = git_data["remote_probe"]
+                repo_entry["remote_probe"] = {
+                    "plataforma": rp.get("platform", ""),
+                    "publico": rp.get("public", False),
+                    "info": rp.get("repo_info", {}),
+                }
+            entry["repositorio"] = repo_entry
         sev = f.get("severity", "media")
         classified_findings.get(sev, classified_findings["media"]).append(entry)
 
@@ -2873,7 +3462,7 @@ def print_summary(results, domain):
         "tls": "TLS/SSL",
         "dns": "DNS/Email (SPF/DMARC)",
         "exposure": "Surface Exposure",
-        "leakix": "Data Exposures (LeakIX)",
+        "leakix": "Confirmed Data Exposures",
         "breach": "Breach History",
         "compliance": "RGPD/LSSI Compliance",
         "misconfig": "Sensitive Files/Misconfig",
