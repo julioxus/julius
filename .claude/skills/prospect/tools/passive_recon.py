@@ -34,6 +34,86 @@ HEADER_IMPACT = {
     "permissions-policy": "Sin esta cabecera, cualquier script embebido puede acceder a la cámara, micrófono o geolocalización del usuario",
 }
 
+TIMEOUT_FAST = 8
+TIMEOUT_DEFAULT = 10
+TIMEOUT_SLOW = 15
+MAX_WORKERS = 8
+
+CSP_UNSAFE_DIRECTIVES = {"'unsafe-inline'", "'unsafe-eval'", "*", "data:", "blob:"}
+
+WAF_SIGNATURES = {
+    "cloudflare": {"headers": ["cf-ray", "cf-cache-status", "cf-request-id"], "server": ["cloudflare"]},
+    "aws_waf": {"headers": ["x-amzn-requestid", "x-amz-cf-id"], "server": ["amazons3", "cloudfront"]},
+    "akamai": {"headers": ["x-akamai-transformed", "akamai-origin-hop"], "server": ["akamaighost", "akamai"]},
+    "sucuri": {"headers": ["x-sucuri-id", "x-sucuri-cache"], "server": ["sucuri"]},
+    "imperva": {"headers": ["x-iinfo", "x-cdn"], "server": ["imperva", "incapsula"]},
+    "f5_bigip": {"headers": ["x-wa-info"], "server": ["bigip", "big-ip"]},
+    "barracuda": {"headers": ["barra_counter_session"], "server": ["barracuda"]},
+    "fortiweb": {"headers": ["fortiwafsid"], "server": ["fortiweb"]},
+    "wordfence": {"headers": ["x-wordfence-blocked"], "server": []},
+    "modsecurity": {"headers": [], "server": ["mod_security", "modsecurity"]},
+}
+
+DANGLING_CNAME_SERVICES = {
+    "github.io": "GitHub Pages",
+    "herokuapp.com": "Heroku",
+    "herokudns.com": "Heroku",
+    "s3.amazonaws.com": "AWS S3",
+    "s3-website": "AWS S3",
+    "cloudfront.net": "AWS CloudFront",
+    "azurewebsites.net": "Azure",
+    "azure-api.net": "Azure API",
+    "trafficmanager.net": "Azure Traffic Manager",
+    "blob.core.windows.net": "Azure Blob",
+    "pantheonsite.io": "Pantheon",
+    "netlify.app": "Netlify",
+    "netlify.com": "Netlify",
+    "vercel.app": "Vercel",
+    "surge.sh": "Surge",
+    "bitbucket.io": "Bitbucket",
+    "ghost.io": "Ghost",
+    "myshopify.com": "Shopify",
+    "wordpress.com": "WordPress.com",
+    "fly.dev": "Fly.io",
+    "unbouncepages.com": "Unbounce",
+    "agilecrm.com": "AgileCRM",
+    "freshdesk.com": "Freshdesk",
+    "zendesk.com": "Zendesk",
+    "readme.io": "ReadMe",
+    "statuspage.io": "Statuspage",
+    "teamwork.com": "Teamwork",
+    "cargo.site": "Cargo",
+    "feedpress.me": "FeedPress",
+    "helpjuice.com": "Helpjuice",
+    "helpscoutdocs.com": "HelpScout",
+    "cargocollective.com": "Cargo",
+    "tictail.com": "Tictail",
+    "bigcartel.com": "Big Cartel",
+    "strikingly.com": "Strikingly",
+    "webflow.io": "Webflow",
+}
+
+JS_API_KEY_PATTERNS = [
+    (r'AIza[0-9A-Za-z\-_]{35}', "Google API Key"),
+    (r'AKIA[0-9A-Z]{16}', "AWS Access Key"),
+    (r'sk_live_[0-9a-zA-Z]{24,}', "Stripe Secret Key"),
+    (r'pk_live_[0-9a-zA-Z]{24,}', "Stripe Publishable Key"),
+    (r'sq0atp-[0-9A-Za-z\-_]{22}', "Square Access Token"),
+    (r'sq0csp-[0-9A-Za-z\-_]{43}', "Square OAuth Secret"),
+    (r'ghp_[0-9a-zA-Z]{36}', "GitHub PAT"),
+    (r'gho_[0-9a-zA-Z]{36}', "GitHub OAuth Token"),
+    (r'glpat-[0-9a-zA-Z\-_]{20}', "GitLab PAT"),
+    (r'xox[baprs]-[0-9a-zA-Z\-]{10,}', "Slack Token"),
+    (r'sk-[0-9a-zA-Z]{48}', "OpenAI API Key"),
+    (r'SG\.[0-9A-Za-z\-_]{22}\.[0-9A-Za-z\-_]{43}', "SendGrid API Key"),
+    (r'key-[0-9a-zA-Z]{32}', "Mailgun API Key"),
+    (r'access_token\$production\$[0-9a-z]{16}\$[0-9a-f]{32}', "PayPal Braintree Token"),
+    (r'EAACEdEose0cBA[0-9A-Za-z]+', "Facebook Access Token"),
+    (r'ya29\.[0-9A-Za-z\-_]+', "Google OAuth Token"),
+    (r'R_[0-9a-f]{32}', "Bitly API Key"),
+    (r'[0-9]+-[0-9A-Za-z_]{32}\.apps\.googleusercontent\.com', "Google OAuth Client ID"),
+]
+
 
 def run_cmd(cmd, timeout=30):
     try:
@@ -48,11 +128,12 @@ def run_cmd(cmd, timeout=30):
 
 
 def check_headers(domain):
-    """Check security headers via HTTP GET."""
-    results = {"raw": "", "headers": {}, "missing": [], "present": [], "score": 0}
+    """Check security headers via HTTP GET, with CSP depth analysis and cookie security."""
+    results = {"raw": "", "headers": {}, "missing": [], "present": [], "score": 0,
+               "csp_analysis": {}, "cookie_security": []}
 
     for scheme in ["https", "http"]:
-        raw = run_cmd(f'curl -sI -L -m 10 {scheme}://{domain}')
+        raw = run_cmd(f'curl -sI -L -m {TIMEOUT_DEFAULT} {scheme}://{domain}')
         if raw and "[TIMEOUT]" not in raw and "[ERROR" not in raw:
             results["raw"] += f"--- {scheme.upper()} ---\n{raw}\n"
             break
@@ -73,8 +154,176 @@ def check_headers(domain):
         else:
             results["missing"].append(header)
 
+    # CSP depth analysis
+    csp_value = results["headers"].get("content-security-policy", "")
+    if csp_value:
+        csp = {"raw": csp_value, "issues": [], "directives": {}}
+        for directive in csp_value.split(";"):
+            directive = directive.strip()
+            if not directive:
+                continue
+            parts = directive.split()
+            if parts:
+                name = parts[0].lower()
+                values = parts[1:]
+                csp["directives"][name] = values
+                for v in values:
+                    if v in CSP_UNSAFE_DIRECTIVES:
+                        csp["issues"].append(f"{name}: {v}")
+        if not csp["directives"].get("default-src") and not csp["directives"].get("script-src"):
+            csp["issues"].append("Sin default-src ni script-src definidos")
+        results["csp_analysis"] = csp
+
+    # Cookie security analysis
+    cookies = []
+    for line in raw.split("\n"):
+        if line.lower().startswith("set-cookie:"):
+            cookie_str = line.split(":", 1)[1].strip()
+            name = cookie_str.split("=")[0].strip() if "=" in cookie_str else cookie_str.split(";")[0].strip()
+            cookie_lower = cookie_str.lower()
+            cookies.append({
+                "name": name[:50],
+                "secure": "secure" in cookie_lower,
+                "httponly": "httponly" in cookie_lower,
+                "samesite": "samesite" in cookie_lower,
+                "samesite_value": _extract_samesite(cookie_lower),
+            })
+    results["cookie_security"] = cookies
+
     raw_score = round(len(results["present"]) / len(SECURITY_HEADERS) * 10)
+    if csp_value and results.get("csp_analysis", {}).get("issues"):
+        n_issues = len(results["csp_analysis"]["issues"])
+        raw_score = max(raw_score - min(n_issues, 2), 3)
     results["score"] = max(raw_score, 5)
+    return results
+
+
+def _extract_samesite(cookie_lower):
+    m = re.search(r'samesite\s*=\s*(\w+)', cookie_lower)
+    return m.group(1) if m else ""
+
+
+def check_waf(domain):
+    """Detect WAF/CDN from response headers. Informational — doesn't lower score."""
+    results = {"raw": "", "detected": [], "has_waf": False}
+    raw = run_cmd(f'curl -sI -L -m {TIMEOUT_DEFAULT} https://{domain}')
+    if not raw or "[TIMEOUT]" in raw:
+        raw = run_cmd(f'curl -sI -L -m {TIMEOUT_DEFAULT} http://{domain}')
+    results["raw"] = raw or ""
+    if not raw:
+        return results
+    raw_lower = raw.lower()
+    for waf_name, sigs in WAF_SIGNATURES.items():
+        for h in sigs.get("headers", []):
+            if h.lower() in raw_lower:
+                results["detected"].append(waf_name)
+                break
+        else:
+            for s in sigs.get("server", []):
+                if s.lower() in raw_lower:
+                    results["detected"].append(waf_name)
+                    break
+    results["detected"] = list(set(results["detected"]))
+    results["has_waf"] = len(results["detected"]) > 0
+    return results
+
+
+def check_cors(domain):
+    """Check CORS policy by sending a foreign Origin header."""
+    results = {"raw": "", "misconfigured": False, "allows_wildcard": False,
+               "reflects_origin": False, "details": {}, "score": 10}
+    test_origin = "https://evil-cors-test.com"
+    raw = run_cmd(
+        f'curl -sI -m {TIMEOUT_DEFAULT} -H "Origin: {test_origin}" '
+        f'-H "User-Agent: Mozilla/5.0" https://{domain}'
+    )
+    results["raw"] = raw or ""
+    if not raw:
+        return results
+    acao = ""
+    acac = ""
+    for line in raw.split("\n"):
+        ll = line.lower().strip()
+        if ll.startswith("access-control-allow-origin:"):
+            acao = line.split(":", 1)[1].strip()
+        if ll.startswith("access-control-allow-credentials:"):
+            acac = line.split(":", 1)[1].strip().lower()
+    results["details"]["acao"] = acao
+    results["details"]["acac"] = acac
+    if acao == "*":
+        results["allows_wildcard"] = True
+        results["misconfigured"] = True
+        results["score"] = 6
+    elif test_origin in acao:
+        results["reflects_origin"] = True
+        results["misconfigured"] = True
+        if acac == "true":
+            results["score"] = 3
+        else:
+            results["score"] = 5
+    # Verify via OPTIONS preflight to avoid false positives (Kasada-edge pattern)
+    if results["reflects_origin"]:
+        preflight = run_cmd(
+            f'curl -sI -m {TIMEOUT_DEFAULT} -X OPTIONS '
+            f'-H "Origin: {test_origin}" '
+            f'-H "Access-Control-Request-Method: GET" '
+            f'-H "User-Agent: Mozilla/5.0" https://{domain}'
+        )
+        results["raw"] += f"\n--- OPTIONS preflight ---\n{preflight or ''}\n"
+        if preflight:
+            preflight_acao = ""
+            for line in preflight.split("\n"):
+                if line.lower().strip().startswith("access-control-allow-origin:"):
+                    preflight_acao = line.split(":", 1)[1].strip()
+            if test_origin not in preflight_acao:
+                results["reflects_origin"] = False
+                results["misconfigured"] = False
+                results["score"] = 10
+                results["details"]["note"] = "Origin reflected on GET but not on OPTIONS preflight — likely WAF/error page artifact"
+    return results
+
+
+def check_js_api_keys(domain):
+    """Scan inline and external JS for leaked API keys."""
+    results = {"raw": "", "keys_found": [], "score": 10}
+    html = run_cmd(f'curl -sL -m {TIMEOUT_SLOW} https://{domain}')
+    if not html or "[TIMEOUT]" in html:
+        return results
+    results["raw"] = f"HTML length: {len(html)}\n"
+    scan_content = html
+    # Also fetch external JS files referenced in the page
+    js_urls = re.findall(r'<script[^>]+src=["\']([^"\']+\.js[^"\']*)["\']', html, re.I)
+    external_js = ""
+    for js_url in js_urls[:10]:
+        if js_url.startswith("//"):
+            js_url = "https:" + js_url
+        elif js_url.startswith("/"):
+            js_url = f"https://{domain}{js_url}"
+        elif not js_url.startswith("http"):
+            continue
+        if domain not in js_url and "cdn" not in js_url.lower():
+            continue
+        js_body = run_cmd(f'curl -sL -m {TIMEOUT_FAST} "{js_url}"')
+        if js_body and "[TIMEOUT]" not in js_body:
+            external_js += js_body + "\n"
+    if external_js:
+        scan_content += "\n" + external_js
+        results["raw"] += f"External JS scanned: {len(js_urls[:10])} files\n"
+    for pattern, key_type in JS_API_KEY_PATTERNS:
+        for m in re.finditer(pattern, scan_content):
+            key_value = m.group(0)
+            redacted = key_value[:8] + "…" + key_value[-4:] if len(key_value) > 16 else key_value[:4] + "…"
+            if not any(k["type"] == key_type for k in results["keys_found"]):
+                results["keys_found"].append({
+                    "type": key_type,
+                    "redacted": redacted,
+                    "context": scan_content[max(0, m.start()-30):m.end()+30][:100],
+                })
+    if results["keys_found"]:
+        critical_types = {"AWS Access Key", "Stripe Secret Key", "OpenAI API Key", "GitHub PAT",
+                         "GitLab PAT", "Slack Token", "SendGrid API Key"}
+        has_critical = any(k["type"] in critical_types for k in results["keys_found"])
+        results["score"] = 2 if has_critical else 5
     return results
 
 
@@ -408,8 +657,9 @@ def check_dns(domain):
 
 
 def check_subdomains(domain):
-    """Enumerate subdomains via Certificate Transparency (crt.sh)."""
-    results = {"raw": "", "subdomains": [], "notable": [], "count": 0, "score": 10}
+    """Enumerate subdomains via Certificate Transparency (crt.sh) + check for takeover signals."""
+    results = {"raw": "", "subdomains": [], "notable": [], "count": 0,
+               "takeover_candidates": [], "score": 10}
 
     raw = run_cmd(
         f'curl -s "https://crt.sh/?q=%25.{domain}&output=json" -m 15',
@@ -444,6 +694,45 @@ def check_subdomains(domain):
     except (json.JSONDecodeError, TypeError):
         results["subdomains"] = []
         results["count"] = 0
+
+    # Subdomain takeover detection — check notable + random sample for dangling CNAMEs
+    candidates_to_check = list(results["notable"][:10])
+    remaining = [s for s in results["subdomains"] if s not in candidates_to_check]
+    candidates_to_check.extend(remaining[:10])
+
+    def _check_takeover(sub):
+        cname_raw = run_cmd(f'dig +short CNAME {sub}', timeout=TIMEOUT_FAST)
+        if not cname_raw or "[TIMEOUT]" in cname_raw:
+            return None
+        cname = cname_raw.strip().rstrip(".")
+        if not cname:
+            return None
+        for service_domain, service_name in DANGLING_CNAME_SERVICES.items():
+            if service_domain in cname.lower():
+                http_check = run_cmd(
+                    f'curl -sk -o /dev/null -w "%{{http_code}}" -m {TIMEOUT_FAST} https://{sub}',
+                    timeout=TIMEOUT_DEFAULT
+                )
+                status = http_check.strip()
+                if status in ("404", "000", ""):
+                    return {"subdomain": sub, "cname": cname, "service": service_name, "status": status}
+        return None
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {executor.submit(_check_takeover, sub): sub for sub in candidates_to_check}
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result:
+                    results["takeover_candidates"].append(result)
+            except Exception:
+                pass
+
+    if results["takeover_candidates"]:
+        results["score"] -= min(len(results["takeover_candidates"]) * 2, 4)
+        results["raw"] += f"\n--- Takeover candidates: {len(results['takeover_candidates'])} ---\n"
+        for tc in results["takeover_candidates"]:
+            results["raw"] += f"  {tc['subdomain']} → {tc['cname']} ({tc['service']}, status: {tc['status']})\n"
 
     return results
 
@@ -2751,9 +3040,12 @@ def run_recon(domain, output_dir, company="", sector=""):
         "emails": lambda: harvest_emails(domain),
         "compliance": lambda: check_compliance(domain),
         "sensitive_paths": lambda: check_sensitive_paths(domain),
+        "waf": lambda: check_waf(domain),
+        "cors": lambda: check_cors(domain),
+        "js_keys": lambda: check_js_api_keys(domain),
     }
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(fn): name for name, fn in checks.items()}
         for future in as_completed(futures):
             name = futures[future]
@@ -2939,6 +3231,33 @@ def run_recon(domain, output_dir, company="", sector=""):
         (evidence_dir / "compliance.json").write_text(
             json.dumps(results["compliance"], indent=2, default=str)
         )
+    # Save headers evidence (cookie_security, csp_analysis needed by PDF)
+    if "headers" in results:
+        headers_evidence = {k: v for k, v in results["headers"].items() if k != "raw"}
+        (evidence_dir / "headers.json").write_text(
+            json.dumps(headers_evidence, indent=2, default=str)
+        )
+    # Save new check evidence
+    waf_data = results.pop("waf", {})
+    cors_data = results.pop("cors", {})
+    js_keys_data = results.pop("js_keys", {})
+    if waf_data:
+        (evidence_dir / "waf.json").write_text(
+            json.dumps({k: v for k, v in waf_data.items() if k != "raw"}, indent=2, default=str)
+        )
+    if cors_data:
+        (evidence_dir / "cors.json").write_text(
+            json.dumps({k: v for k, v in cors_data.items() if k != "raw"}, indent=2, default=str)
+        )
+    if js_keys_data and js_keys_data.get("keys_found"):
+        (evidence_dir / "js_keys.json").write_text(
+            json.dumps({k: v for k, v in js_keys_data.items() if k != "raw"}, indent=2, default=str)
+        )
+    # Store in results for scoring/PDF access
+    results["waf"] = waf_data
+    results["cors"] = cors_data
+    results["js_keys"] = js_keys_data
+
     if "sensitive_paths" in results:
         sp_evidence = {k: v for k, v in results["sensitive_paths"].items() if k != "raw"}
         for f in sp_evidence.get("findings", []):
@@ -2949,6 +3268,10 @@ def run_recon(domain, output_dir, company="", sector=""):
 
     lix = results.get("leakix", {})
     lix_has_data = lix.get("leak_count", 0) > 0 or lix.get("service_count", 0) > 0
+
+    # Factor CORS + JS keys into exposure score
+    cors_score = cors_data.get("score", 10) if cors_data else 10
+    js_keys_score = js_keys_data.get("score", 10) if js_keys_data else 10
 
     scores = {
         "headers": results.get("headers", {}).get("score", 5),
@@ -2965,6 +3288,14 @@ def run_recon(domain, output_dir, company="", sector=""):
     }
     if lix_has_data:
         scores["leakix"] = lix.get("score", 10)
+
+    # CORS misconfiguration lowers exposure score
+    if cors_score < 8:
+        scores["exposure"] = min(scores["exposure"], cors_score)
+
+    # JS API keys lower misconfig score
+    if js_keys_score < 8:
+        scores["misconfig"] = min(scores["misconfig"], js_keys_score)
 
     if lix_has_data:
         weights = {
@@ -3088,12 +3419,14 @@ def run_recon(domain, output_dir, company="", sector=""):
 
     results["scoring"] = scoring
 
-    _save_recon_completo(results, domain, company, sector, scoring, evidence_dir, nuclei_data)
+    _save_recon_completo(results, domain, company, sector, scoring, evidence_dir, nuclei_data,
+                         waf_data=waf_data, cors_data=cors_data, js_keys_data=js_keys_data)
 
     return results
 
 
-def _save_recon_completo(results, domain, company, sector, scoring, evidence_dir, nuclei_data):
+def _save_recon_completo(results, domain, company, sector, scoring, evidence_dir, nuclei_data,
+                         waf_data=None, cors_data=None, js_keys_data=None):
     """Build and save a comprehensive, classified recon report to evidence/recon_completo.json."""
     headers = results.get("headers", {})
     tech = results.get("tech", {})
@@ -3337,6 +3670,7 @@ def _save_recon_completo(results, domain, company, sector, scoring, evidence_dir
                 "lista": sub_list,
                 "solo_shodan": shodan_only_hostnames,
                 "notables": subs.get("notable", []),
+                "takeover_candidates": subs.get("takeover_candidates", []),
             },
         },
         "tecnologias": {
@@ -3346,12 +3680,27 @@ def _save_recon_completo(results, domain, company, sector, scoring, evidence_dir
             "meta_generator": tech.get("meta_generator", ""),
         },
         "seguridad_web": {
+            "waf": {
+                "detectado": (waf_data or {}).get("has_waf", False),
+                "productos": (waf_data or {}).get("detected", []),
+            },
+            "cors": {
+                "misconfigured": (cors_data or {}).get("misconfigured", False),
+                "allows_wildcard": (cors_data or {}).get("allows_wildcard", False),
+                "reflects_origin": (cors_data or {}).get("reflects_origin", False),
+                "details": (cors_data or {}).get("details", {}),
+            },
+            "js_api_keys": {
+                "keys_found": (js_keys_data or {}).get("keys_found", []),
+            },
+            "cookie_security": headers.get("cookie_security", []),
             "cabeceras": {
                 "puntuacion": headers.get("score", 0),
                 "presentes": headers.get("present", []),
                 "ausentes": headers.get("missing", []),
-                "csp": headers.get("csp", ""),
-                "hsts": headers.get("hsts", ""),
+                "csp": headers.get("headers", {}).get("content-security-policy", ""),
+                "csp_analysis": headers.get("csp_analysis", {}),
+                "hsts": headers.get("headers", {}).get("strict-transport-security", ""),
             },
             "tls": {
                 "puntuacion": tls_data.get("score", 0),

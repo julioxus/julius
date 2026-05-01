@@ -63,6 +63,28 @@ AREA_ICONS = {
     "misconfig": "&#128270;",
 }
 
+METHODOLOGY_CHECKS = [
+    ("Cabeceras HTTP de seguridad", "Verificación de HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy y Permissions-Policy en las respuestas del servidor."),
+    ("Análisis CSP en profundidad", "Evaluación de la calidad de la Content Security Policy: directivas inseguras (unsafe-inline, unsafe-eval, *), cobertura de script-src y default-src."),
+    ("Seguridad de cookies", "Verificación de los atributos Secure, HttpOnly y SameSite en las cookies establecidas por el servidor."),
+    ("Certificado SSL/TLS", "Análisis del certificado (validez, emisor, algoritmo de firma), protocolos soportados (TLS 1.0-1.3), y cifrados débiles. Metodología equivalente a Qualys SSL Labs."),
+    ("Detección de WAF/CDN", "Identificación de firewalls de aplicación web (Cloudflare, AWS WAF, Akamai, Sucuri, Imperva, etc.) mediante cabeceras HTTP."),
+    ("Política CORS", "Envío de cabecera Origin arbitraria para detectar configuraciones CORS permisivas que permitan acceso desde cualquier dominio, incluyendo verificación via preflight OPTIONS."),
+    ("Configuración DNS", "Verificación de registros SPF, DMARC, MX y DNSSEC para evaluar la protección contra suplantación de email."),
+    ("Enumeración de subdominios", "Consulta de Certificate Transparency (crt.sh) para identificar subdominios emitidos con certificado. Detección de subdominios notables (admin, staging, dev, api, vpn)."),
+    ("Detección de subdomain takeover", "Verificación de registros CNAME que apunten a servicios externos abandonados (GitHub Pages, Heroku, S3, Azure, Netlify, etc.)."),
+    ("Superficie expuesta (Shodan)", "Consulta de InternetDB para identificar puertos abiertos, servicios, y vulnerabilidades conocidas (CVE) asociadas a la IP del dominio."),
+    ("Exposiciones confirmadas", "Consulta de motores de búsqueda especializados en seguridad para detectar servicios mal configurados, bases de datos expuestas y filtraciones indexadas."),
+    ("Detección de tecnologías", "Identificación de CMS, frameworks, lenguajes y versiones mediante cabeceras HTTP, metadatos HTML, y análisis automatizado (nuclei)."),
+    ("Vulnerabilidades conocidas (CVE)", "Consulta de la base de datos NVD del NIST para cada versión de software detectada, con clasificación por gravedad CVSS."),
+    ("Claves API en JavaScript", "Escaneo del código JavaScript público (inline y archivos externos) en busca de claves de API expuestas (Google, AWS, Stripe, OpenAI, GitHub, Slack, etc.)."),
+    ("Archivos y rutas sensibles", "Verificación pasiva de archivos que no deberían ser públicos (.env, .git, phpinfo, backups, paneles de base de datos, debug logs, .DS_Store, .svn, xmlrpc.php)."),
+    ("Variantes de dominio TLD", "Escaneo de variantes del dominio con diferentes TLD (.es, .com, .net, .org) para detectar hallazgos en dominios hermanos."),
+    ("Recolección de emails", "Búsqueda de direcciones de email asociadas al dominio en motores de búsqueda (Bing, DuckDuckGo), Certificate Transparency, Wayback Machine, y páginas del sitio web."),
+    ("Verificación en filtraciones", "Comprobación de cada email encontrado contra bases de datos de brechas de seguridad conocidas (XposedOrNot, LeakCheck, HIBP si está configurado)."),
+    ("Cumplimiento RGPD/LSSI-CE", "Verificación de banner de cookies/consentimiento, política de privacidad, aviso legal (LSSI-CE), archivo security.txt (RFC 9116) y robots.txt. Incluye renderizado con navegador headless."),
+]
+
 GRADE_COLORS = {
     "A": "#16a34a", "B": "#2563eb", "C": "#d97706", "D": "#ea580c", "F": "#dc2626",
 }
@@ -248,6 +270,26 @@ def load_evidence_json(evidence_dir, filename):
     return {}
 
 
+WAF_DISPLAY_NAMES = {
+    "cloudflare": "Cloudflare", "aws_waf": "AWS WAF/CloudFront", "akamai": "Akamai",
+    "sucuri": "Sucuri", "imperva": "Imperva/Incapsula", "f5_bigip": "F5 BIG-IP",
+    "barracuda": "Barracuda", "fortiweb": "FortiWeb", "wordfence": "Wordfence",
+    "modsecurity": "ModSecurity",
+}
+
+
+def _waf_info_html(waf_data):
+    if not isinstance(waf_data, dict) or not waf_data.get("has_waf"):
+        return ""
+    detected = waf_data.get("detected", [])
+    if not detected:
+        return ""
+    names = ", ".join(escape(WAF_DISPLAY_NAMES.get(d, d) if isinstance(d, str) else d.get("name", "")) for d in detected)
+    return f"""<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:10px 16px;margin:12px 0;font-size:9.5pt">
+    <strong style="color:#166534">&#128737; WAF/CDN detectado:</strong> {names}.
+    La presencia de un WAF puede mitigar algunas vulnerabilidades web, pero no sustituye la configuraci&oacute;n segura del servidor.</div>"""
+
+
 def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64="", consultant=None):
     if consultant is None:
         consultant = {}
@@ -271,6 +313,10 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
     shodan_data = load_evidence_json(evidence_dir, "shodan.json")
     leakix_data = load_evidence_json(evidence_dir, "leakix.json")
     sensitive_paths_data = load_evidence_json(evidence_dir, "sensitive_paths.json")
+    waf_data = load_evidence_json(evidence_dir, "waf.json")
+    cors_data = load_evidence_json(evidence_dir, "cors.json")
+    js_keys_data = load_evidence_json(evidence_dir, "js_keys.json")
+    headers_data = load_evidence_json(evidence_dir, "headers.json")
 
     # Classify findings by severity using consistent thresholds
     # < 5 = Alta, 5-7 = Media, >= 8 = Bueno (no finding)
@@ -870,7 +916,120 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
           de consentimiento de cookies.</p>
         </div>"""
 
-    # Headers finding — last, lowest priority (defense-in-depth)
+    # CORS misconfiguration finding
+    cors_misconfigured = cors_data.get("misconfigured", False) if isinstance(cors_data, dict) else False
+    if cors_misconfigured:
+        cors_reflects = cors_data.get("reflects_origin", False)
+        cors_wildcard = cors_data.get("allows_wildcard", False)
+        cors_acac = cors_data.get("details", {}).get("acac", "")
+        if cors_reflects and cors_acac == "true":
+            cors_sev_class, cors_sev_label = "critical", "Alta"
+            cors_desc = "El servidor refleja cualquier origen en <code>Access-Control-Allow-Origin</code> junto con <code>Access-Control-Allow-Credentials: true</code>. Esto permite a cualquier web maliciosa realizar peticiones autenticadas en nombre de los usuarios."
+        elif cors_wildcard:
+            cors_sev_class, cors_sev_label = "medium", "Media"
+            cors_desc = "El servidor permite acceso desde cualquier origen (<code>Access-Control-Allow-Origin: *</code>). Aunque no se env&iacute;an credenciales con wildcard, datos p&uacute;blicos de la API pueden ser consumidos por terceros."
+        else:
+            cors_sev_class, cors_sev_label = "medium", "Media"
+            cors_desc = "El servidor refleja el origen en las respuestas CORS, lo que puede permitir acceso no autorizado a datos de la API."
+        findings_html += f"""
+        <div class="finding-card" style="border-left: 4px solid {'#ef4444' if cors_sev_class == 'critical' else '#eab308'}">
+          <h3><span class="badge sev-{cors_sev_class}">{cors_sev_label}</span> &nbsp;Pol&iacute;tica CORS permisiva</h3>
+          <p>{cors_desc}</p>
+          <p><span class="risk-label">Riesgo:</span> Un atacante puede crear una p&aacute;gina web que realice peticiones
+          al servidor de {escape(domain)} y lea las respuestas, potencialmente accediendo a datos privados de los usuarios.</p>
+        </div>"""
+
+    # JS API keys finding
+    js_keys_found = js_keys_data.get("keys_found", []) if isinstance(js_keys_data, dict) else []
+    if js_keys_found:
+        critical_key_types = {"AWS Access Key", "Stripe Secret Key", "OpenAI API Key", "GitHub PAT",
+                            "GitLab PAT", "Slack Token", "SendGrid API Key"}
+        has_critical_key = any(k.get("type") in critical_key_types for k in js_keys_found)
+        jk_sev_class = "critical" if has_critical_key else "medium"
+        jk_sev_label = "Alta" if has_critical_key else "Media"
+        key_rows = ""
+        for k in js_keys_found:
+            key_rows += f"<tr><td>{escape(k.get('type', ''))}</td><td><code>{escape(k.get('redacted', ''))}</code></td></tr>"
+        findings_html += f"""
+        <div class="finding-card" style="border-left: 4px solid {'#ef4444' if has_critical_key else '#eab308'}">
+          <h3><span class="badge sev-{jk_sev_class}">{jk_sev_label}</span> &nbsp;Claves API expuestas en JavaScript</h3>
+          <p>Se han detectado <strong>{len(js_keys_found)} clave(s) de API</strong> en el c&oacute;digo JavaScript
+          p&uacute;blico de la web. Estas claves son accesibles para cualquier visitante.</p>
+          <table class="mini-table"><thead><tr><th>Tipo</th><th>Clave (redactada)</th></tr></thead>
+          <tbody>{key_rows}</tbody></table>
+          <p><span class="risk-label">Riesgo:</span> Las claves API expuestas pueden ser utilizadas por atacantes para
+          acceder a servicios de pago (generando costes), enviar emails en nombre de la empresa, o acceder a datos almacenados
+          en servicios cloud.</p>
+        </div>"""
+
+    # Subdomain takeover finding
+    takeover_candidates = []
+    if isinstance(subdomain_data, dict):
+        takeover_candidates = subdomain_data.get("takeover_candidates", [])
+    if takeover_candidates:
+        tc_rows = ""
+        for tc in takeover_candidates:
+            tc_rows += f"<tr><td><code>{escape(tc.get('subdomain', ''))}</code></td><td><code>{escape(tc.get('cname', ''))}</code></td><td>{escape(tc.get('service', ''))}</td></tr>"
+        findings_html += f"""
+        <div class="finding-card" style="border-left: 4px solid #ef4444">
+          <h3><span class="badge sev-critical">Alta</span> &nbsp;Subdominios vulnerables a takeover</h3>
+          <p>Se han detectado <strong>{len(takeover_candidates)} subdominio(s)</strong> que apuntan (CNAME) a servicios
+          externos que no est&aacute;n activos. Un atacante podr&iacute;a registrarse en el servicio y tomar control
+          del subdominio.</p>
+          <table><thead><tr><th>Subdominio</th><th>CNAME</th><th>Servicio</th></tr></thead>
+          <tbody>{tc_rows}</tbody></table>
+          <p><span class="risk-label">Riesgo:</span> Un atacante que tome control de un subdominio puede servir contenido
+          malicioso bajo el dominio de la empresa, robar cookies de sesi&oacute;n (si el dominio principal no restringe
+          SameSite), o lanzar campa&ntilde;as de phishing con un dominio leg&iacute;timo.</p>
+        </div>"""
+
+    # Cookie security finding
+    cookie_security = []
+    if isinstance(headers_data, dict):
+        cookie_security = headers_data.get("cookie_security", [])
+    if not cookie_security:
+        cookie_security = scores_data.get("details", {}).get("cookie_security", [])
+    insecure_cookies = [c for c in cookie_security if not c.get("secure") or not c.get("httponly")]
+    if insecure_cookies:
+        cookie_rows = ""
+        for c in insecure_cookies[:10]:
+            secure_icon = "&#10004;" if c.get("secure") else "<span style='color:#dc2626'>&#10008;</span>"
+            http_icon = "&#10004;" if c.get("httponly") else "<span style='color:#dc2626'>&#10008;</span>"
+            ss_val = c.get("samesite_value", "")
+            ss_icon = f"&#10004; ({escape(ss_val)})" if c.get("samesite") else "<span style='color:#dc2626'>&#10008;</span>"
+            cookie_rows += f"<tr><td><code>{escape(c.get('name', '?')[:30])}</code></td><td style='text-align:center'>{secure_icon}</td><td style='text-align:center'>{http_icon}</td><td style='text-align:center'>{ss_icon}</td></tr>"
+        findings_html += f"""
+        <div class="finding-card">
+          <h3><span class="badge sev-medium">Media</span> &nbsp;Cookies sin atributos de seguridad</h3>
+          <p>Se han detectado <strong>{len(insecure_cookies)} cookie(s)</strong> que no incluyen todos los
+          atributos de seguridad recomendados:</p>
+          <table><thead><tr><th>Cookie</th><th>Secure</th><th>HttpOnly</th><th>SameSite</th></tr></thead>
+          <tbody>{cookie_rows}</tbody></table>
+          <p><span class="risk-label">Riesgo:</span> Sin <code>Secure</code>, la cookie puede enviarse por HTTP sin cifrar.
+          Sin <code>HttpOnly</code>, un ataque XSS puede robar la cookie. Sin <code>SameSite</code>, la cookie se env&iacute;a
+          en peticiones cross-site, facilitando ataques CSRF.</p>
+        </div>"""
+
+    # CSP depth analysis finding
+    csp_analysis = {}
+    if isinstance(headers_data, dict):
+        csp_analysis = headers_data.get("csp_analysis", {})
+    if not csp_analysis:
+        csp_analysis = scores_data.get("details", {}).get("csp_analysis", {})
+    csp_issues = csp_analysis.get("issues", [])
+    if csp_issues:
+        issue_items = "".join(f"<li><code>{escape(i)}</code></li>" for i in csp_issues)
+        findings_html += f"""
+        <div class="finding-card">
+          <h3><span class="badge sev-medium">Media</span> &nbsp;Content Security Policy (CSP) d&eacute;bil</h3>
+          <p>Aunque el servidor define una pol&iacute;tica CSP, contiene directivas inseguras que reducen su efectividad:</p>
+          <ul style="margin:4px 0 10px 18px">{issue_items}</ul>
+          <p><span class="risk-label">Riesgo:</span> Directivas como <code>'unsafe-inline'</code> y <code>'unsafe-eval'</code>
+          permiten la ejecuci&oacute;n de c&oacute;digo JavaScript arbitrario, anulando la protecci&oacute;n contra XSS
+          que CSP deber&iacute;a ofrecer.</p>
+        </div>"""
+
+    # Headers finding — lowest priority (defense-in-depth)
     hs = scores.get("headers", 5)
     if hs < 8:
         sev, sev_label = _sev(hs)
@@ -977,6 +1136,20 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
         if "ds_store" in sp_cats:
             recs_medium.append("Eliminar el archivo <code>.DS_Store</code> y a&ntilde;adirlo a <code>.gitignore</code> y reglas del servidor")
 
+    if cors_misconfigured:
+        if cors_data.get("reflects_origin") and cors_data.get("details", {}).get("acac") == "true":
+            recs_high.append("Corregir la pol&iacute;tica CORS: no reflejar or&iacute;genes arbitrarios con <code>Access-Control-Allow-Credentials: true</code>")
+        else:
+            recs_medium.append("Restringir la pol&iacute;tica CORS a or&iacute;genes espec&iacute;ficos en lugar de wildcard o reflexi&oacute;n")
+    if js_keys_found:
+        recs_high.append("Revocar y rotar las claves API expuestas en JavaScript p&uacute;blico y moverlas al backend")
+    if takeover_candidates:
+        recs_high.append("Eliminar los registros CNAME hu&eacute;rfanos o reactivar los servicios externos para evitar subdomain takeover")
+    if insecure_cookies:
+        recs_medium.append("A&ntilde;adir los atributos <code>Secure</code>, <code>HttpOnly</code> y <code>SameSite</code> a todas las cookies")
+    if csp_issues:
+        recs_medium.append("Eliminar directivas inseguras de la CSP (<code>'unsafe-inline'</code>, <code>'unsafe-eval'</code>, <code>*</code>)")
+
     if breach_count > 0 and not breached_emails:
         recs_medium.append("Monitorizar las filtraciones del dominio y revisar la pol&iacute;tica de contrase&ntilde;as de la organizaci&oacute;n")
     if website_emails:
@@ -1044,6 +1217,8 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
 
 {chart_html}
 
+{_waf_info_html(waf_data)}
+
 <h2>Hallazgos</h2>
 {findings_html}
 
@@ -1057,6 +1232,15 @@ def build_html(company, domain, scores_data, evidence_dir, chart_b64, gauge_b64=
   <h2>Plan de acci&oacute;n recomendado</h2>
   {recs_html}
 </div>
+
+<h2 style="page-break-before:always">Metodolog&iacute;a</h2>
+<p>Este informe se basa en <strong>{len(METHODOLOGY_CHECKS)} comprobaciones pasivas</strong>, realizadas
+exclusivamente con informaci&oacute;n de acceso p&uacute;blico. No se ha realizado ninguna prueba intrusiva
+ni se ha accedido a sistemas protegidos.</p>
+<table style="font-size:9pt">
+  <thead><tr><th style="width:30%">Comprobaci&oacute;n</th><th>Descripci&oacute;n</th></tr></thead>
+  <tbody>{''.join(f'<tr><td><strong>{escape(name)}</strong></td><td>{escape(desc)}</td></tr>' for name, desc in METHODOLOGY_CHECKS)}</tbody>
+</table>
 
 <div class="cta-box">
   <h3>&iquest;Interesado en mejorar la seguridad de su empresa?</h3>
@@ -1113,16 +1297,18 @@ def generate_pdf(company, domain, scores_path, evidence_dir, output_path):
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page()
-        page.goto(html_path.resolve().as_uri())
-        page.pdf(
-            path=str(pdf_path),
-            format="A4",
-            margin={"top": "20mm", "bottom": "22mm", "left": "18mm", "right": "18mm"},
-            print_background=True,
-            prefer_css_page_size=True,
-        )
-        browser.close()
+        try:
+            page = browser.new_page()
+            page.goto(html_path.resolve().as_uri())
+            page.pdf(
+                path=str(pdf_path),
+                format="A4",
+                margin={"top": "20mm", "bottom": "22mm", "left": "18mm", "right": "18mm"},
+                print_background=True,
+                prefer_css_page_size=True,
+            )
+        finally:
+            browser.close()
 
     return str(pdf_path)
 
