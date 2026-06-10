@@ -6,7 +6,20 @@ BURP_MCP_BRIDGE_PORT="${BURP_MCP_BRIDGE_PORT:-9877}"
 BURP_SSE_URL="${BURP_SSE_URL:-http://127.0.0.1:${BURP_MCP_PORT}/}"
 BRIDGE_SSE_URL="${BRIDGE_SSE_URL:-http://127.0.0.1:${BURP_MCP_BRIDGE_PORT}/}"
 NODE_BIN="${NODE_BIN:-$(command -v node || true)}"
-JAVA_BIN="${JAVA_BIN:-/Applications/Burp Suite Professional.app/Contents/Resources/jre.bundle/Contents/Home/bin/java}"
+# Detect Burp's bundled JRE across editions, falling back to system java.
+if [[ -z "${JAVA_BIN:-}" ]]; then
+  for _candidate in \
+    "/Applications/Burp Suite.app/Contents/Resources/jre.bundle/Contents/Home/bin/java" \
+    "/Applications/Burp Suite Professional.app/Contents/Resources/jre.bundle/Contents/Home/bin/java" \
+    "/Applications/Burp Suite Community Edition.app/Contents/Resources/jre.bundle/Contents/Home/bin/java" \
+    "$(command -v java || true)"; do
+    if [[ -n "${_candidate}" && -x "${_candidate}" ]]; then
+      JAVA_BIN="${_candidate}"
+      break
+    fi
+  done
+fi
+JAVA_BIN="${JAVA_BIN:-/usr/bin/java}"
 PROXY_JAR="${PROXY_JAR:-$HOME/.BurpSuite/mcp-proxy/mcp-proxy-all.jar}"
 
 is_listening() {
