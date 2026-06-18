@@ -126,6 +126,11 @@ Deploy **`pentester-validator`** agent per finding (all in parallel) to run 5 an
    - **Test the "would a customer complain?" heuristic**: If a regular user of this service saw this behavior, would they be surprised? Or is it exactly what they signed up for?
    - **Check for explicit access controls**: Is there a login wall, paywall, or robots.txt restriction that the data bypasses? If the data is freely browsable without authentication, it's likely public by design.
    - **Document your conclusion**: In the finding, explicitly state why this behavior is NOT by design. If you cannot articulate a clear reason, DO NOT report it.
+   - **Internal/first-party apps — check the project's OWN documented design (CRITICAL)**: When source/docs are available (AGENTS.md, CLAUDE.md, README, threat model, ADRs), re-read each finding against the design decisions stated there before finalizing severity. Distinguish:
+     - **Accepted-risk design decision** (e.g., "stage 1: no per-user ACL, all open within the SSO perimeter") → do NOT report as a vuln; at most an informational note. The attacker gains nothing they can't already do.
+     - **Genuine bug that violates the system's OWN stated controls** (e.g., the docs say "apps are confined to their own data folder" or "apps may never run free SQL" and you bypass exactly that) → report it. A control the team deliberately built and you defeated is always in scope, even inside the perimeter.
+     - **Latent-until-future-state** → if a finding only becomes impactful under a planned future change (e.g., "critical once accounts/permissions are added"), DOWNGRADE for the current state and note the future risk + "fix before X lands" explicitly. Do not score it at the future severity.
+     - When a finding's design intent is unclear, add a "Design-intent assessment" line stating why it is (or isn't) intended, and ASK the user.
    - **When in doubt, ASK the user** before reporting — a "by design" rejection wastes everyone's time and damages researcher reputation.
 4. **Submission requirements check**: Does the report include everything the program requires? Read the program's submission requirements — each program has its own (e.g., role used, raw HTTP requests, affected plans, reproduction steps).
 5. **Impact honesty check (CRITICAL — prevents inflated/rejected reports)**:
@@ -145,6 +150,7 @@ Deploy **`pentester-validator`** agent per finding (all in parallel) to run 5 an
      - Data exfil claim → evidence shows retrieved data (redacted)
      - If evidence is missing for a claim: **REJECT and send back to /pentest Phase 5.5** to either prove the claim or rewrite the finding with confirmed-only impact
    - **Mitigations documented**: Does the report acknowledge defenses that affect real-world exploitability? Reports that ignore obvious mitigations (e.g., claiming Critical SSRF when cloud metadata is blocked by IMDSv2) get rejected by triagers.
+   - **Access model — likelihood vs impact (don't over-discount "internal only")**: If the target sits behind SSO/IAP/VPN so only employees/tenants reach it, credit that in the **Base** vector via Privileges Required (PR:L for any authenticated user — never PR:N) and note it. But "only internal users can reach it" lowers **likelihood** (CVSS Environmental/Temporal), NOT **impact** (Base) — do not slash severity just because it's internal. A least-privilege violation *within* the trusted population (any low-priv employee → all finance/PII/admin) is still high impact: the realistic actors are a malicious insider, a compromised/phished account, or a malicious tenant/published app, not "a trusted employee behaving well." State the attacker model explicitly in the report (low-priv user / compromised account / malicious co-tenant or app). When the exposed data type warrants it (cardholder data, PII, health), flag the **compliance** angle (PCI-DSS / GDPR / HIPAA) — uncontrolled internal access does not neutralize it, it is itself the violation.
 6. **Developer reproducibility review**: For EACH finding, verify:
    - All URLs in Steps to Reproduce are FULL (https://...), never relative
    - Auth method explained (how to get tokens/cookies)
@@ -244,6 +250,7 @@ if not result["passed"]:
 - Use technical jargon without defining it — triagers know what XSS is
 - Show testing thought process briefly: "Noticed X in response, tested Y"
 - Keep total report under 500 words (excluding code blocks and HTTP dumps)
+- **Explain in plain language — describe behavior, not implementation**: A reviewer wants *what* is broken, *where*, and *what an attacker gains* — not a code tour. In Summary/Description/Impact, minimize source-code snippets and `file:line`/symbol citations; describe the data flow in words ("the collection name isn't checked, so `../` walks into another app's folder"). Keep specific function/file references for the Mitigation section, or a single short "where in the code" line for SAST findings — not sprinkled through every paragraph. One small snippet is fine when it's the clearest way to show the flaw; a wall of code is not.
 
 **NEVER use these AI-typical patterns:**
 - Introductory filler: "This report details...", "During our security assessment..."
@@ -291,6 +298,21 @@ CVSS:3.1/AV:.../AC:.../...  →  [score] ([severity])
 ```
 
 No Description section. No Background section. No Remediation unless program requires it. No "Affected Users" padding. Every word must earn its place.
+
+### Reproduction format — Burp-first + screenshot placeholders
+
+- **Prefer Burp Repeater raw HTTP requests over curl** in Steps to Reproduce, especially when the target needs session/SSO/IAP auth or when URL normalization matters. Show each step as a raw request (method + path + `Host` + headers + body), e.g.:
+  ```http
+  POST /v1/path HTTP/2
+  Host: target.example.com
+  Cookie: <session captured from authenticated browser>
+  Content-Type: application/json
+
+  {"field":"value"}
+  ```
+- **Prefix the steps with a short Burp setup note**: how the session is obtained (e.g., "open Burp's browser, log in via SSO so Proxy history captures the session cookies; send to Repeater"). The `Cookie`/token values are placeholders, never real secrets.
+- **Preserve and call out critical encodings**: payloads like `%2f` (path traversal), `%00`, double-encoding must stay literal. Note when Burp Repeater sends them as-is while curl/the address bar would normalize them away (`curl --path-as-is` is the curl equivalent) — this is often *why* the PoC works in a browser/Burp but not in a naive curl.
+- **Screenshot placeholders when evidence isn't captured yet**: if the researcher hasn't provided real screenshots, do NOT omit the evidence — leave an explicit placeholder after each step: `![PENDING SCREENSHOT — what it must show](evidence/fNNN_stepN_desc.png)`, and write a short `SCREENSHOTS_TODO.md` checklist (one line per image: filename + what it must prove). Mark the report **not ready to submit/upload** until the placeholders are filled. Keep any real captured tool output (`.txt` of curl/HTTP) as linked *supplementary* evidence.
 
 ### Real Screenshot Requirements (CRITICAL)
 

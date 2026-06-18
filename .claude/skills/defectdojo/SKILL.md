@@ -117,14 +117,15 @@ sast_sink_object: "Http::get()"
 
 Even for internal DefectDojo reports, writing quality matters. Reports that read as AI-generated waste reviewer time and erode trust. See `/bounty-validation` Report Writing Quality Gate for full rules. Key points:
 
-- Write in first person for Summary/Impact: "I found", "I tested", "I noticed"
-- Steps to Reproduce: instructional style ("Send this request", "Open the page") — no first person
+- **Internal DD reports use IMPERSONAL voice — NOT first person** (no "I found"). First person is for external bounty submissions only. Steps to Reproduce: instructional style ("Send this request", "Open the page").
 - Be direct — state the vulnerability, the evidence, the impact. No filler.
 - NO AI phrases: "This report details", "It's important to note", "leveraging", "poses a significant risk", "Furthermore", "Additionally"
 - NO defining known concepts: reviewers know what SSRF is
 - Keep body concise — every sentence must add information
-- Real screenshots from Burp Suite or browser are primary evidence
-- Playwright screenshots are supplementary only
+- **Explain in plain language — describe behavior, not implementation**: minimize source-code snippets and `file:line`/symbol citations in Description/Impact (describe the data flow in words). Keep a single short "where in code" line or save specifics for Mitigation. One small snippet is fine when it's the clearest way to show the flaw; a wall of Go/code is not. (For SAST findings, `file_path`/`line` already live in the frontmatter.)
+- **Steps to Reproduce: Burp Repeater raw HTTP requests** (method + path + Host + headers + body) with a short Burp/IAP setup note, not curl, when the target needs SSO/IAP auth or URL normalization matters. Preserve and call out critical encodings (`%2f` etc.) — Burp sends them literally, curl/address bars normalize them. See `/bounty-validation` → "Reproduction format (Burp-first)".
+- **Real screenshots from Burp Suite or browser are primary evidence; Playwright is supplementary.** If not yet captured, leave `![PENDING SCREENSHOT — what it must show](evidence/fNNN_stepN.png)` placeholders + a `SCREENSHOTS_TODO.md` checklist, and mark the report NOT ready to upload until filled.
+- **By-design / threat-model check before finalizing severity (internal engagements)**: re-read each finding against the project's own documented design (AGENTS.md/CLAUDE.md/README/threat model). An accepted-risk design decision (e.g., "no per-user ACL inside the SSO perimeter") is NOT a vuln; a bug that violates a control the team deliberately built IS. Downgrade findings that only matter under a future state and note "fix before X". Behind IAP/SSO = PR:L (never PR:N) and lower *likelihood*, but do NOT discount *impact* for least-privilege violations within the trusted population. Flag PCI/GDPR/HIPAA when the data type warrants. Full rules: `/bounty-validation` Pre-Submission Gate items 3 & 5.
 
 **Common body structure — writeup style with inline evidence** (same for both types):
 
@@ -257,13 +258,16 @@ After all reports are written locally, run a **self-review pass** before present
    - [ ] **Never**: simulated terminals, reconstructed responses, placeholder screenshots, AI-generated mock output
 
 5. WRITING QUALITY — Anti-AI check (see `/bounty-validation` Report Writing Quality Gate):
-   - [ ] First person voice in Summary/Impact ("I found", "I tested") — Steps to Reproduce use instructional style
+   - [ ] Impersonal voice in Description/Impact (NOT first person — internal DD) — Steps to Reproduce use instructional style
    - [ ] No banned AI phrases: "This report details", "It's important to note", "leveraging", "poses a significant risk", "could potentially", "Furthermore/Additionally" at sentence start
    - [ ] No filler — every sentence adds information. If removing it loses nothing, delete it.
    - [ ] No defining known security concepts (reviewers know what SSRF means)
+   - [ ] Plain language — behavior described in words, not a wall of code/`file:line` in Description/Impact
    - [ ] Description and Impact don't repeat the same information
    - [ ] Real URLs in Steps to Reproduce, no placeholders like `https://[domain]`
-   - [ ] At least one `![](evidence/...)` screenshot reference per finding
+   - [ ] Steps are Burp raw HTTP requests (when SSO/IAP auth or encoding matters); critical encodings (`%2f`) preserved and called out
+   - [ ] At least one `![](evidence/...)` screenshot reference per finding (real, or a `PENDING SCREENSHOT` placeholder + SCREENSHOTS_TODO.md if not yet captured)
+   - [ ] Design-intent checked: finding is a genuine bug, not an accepted-risk design decision; severity reflects current state (future-only risk downgraded); internal/IAP access credited as PR:L without discounting impact
 ```
 
 **If any check fails, fix the report BEFORE presenting to the user.** Do not present reports with known reproducibility issues.
