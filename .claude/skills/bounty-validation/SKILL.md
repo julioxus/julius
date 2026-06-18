@@ -260,11 +260,14 @@ if not result["passed"]:
 - Passive voice: "It was discovered that..." → "I found..." (Summary/Impact only)
 - Hedge phrases: "It's important to note", "It should be noted", "As demonstrated above"
 - Corporate AI vocabulary: "leveraging", "utilizing", "facilitating", "streamlining", "furthermore", "additionally", "consequently"
+- **The em dash character `—`: NEVER use it anywhere (strong AI tell). Use a comma, colon, parentheses, or a spaced hyphen " - " instead. This is a hard rule across all output, not only reports.**
 - Repetitive structure: Don't repeat the same information in Summary, Description, and Impact
 - Unnecessary sections: Don't add Remediation unless the program requires it
 - Padding: Don't state the obvious ("The server returned HTTP 200 which indicates success")
 
-**Banned phrases (HARD BLOCK — report rejected if any appear):**
+**Banned characters (HARD BLOCK): the em dash `—` must never appear in any report or message. Replace with comma / colon / parentheses / " - ".**
+
+**Banned phrases (HARD BLOCK, report rejected if any appear):**
 ```
 "This report details" | "During our assessment" | "It's important to note" |
 "It should be noted" | "As demonstrated above" | "In conclusion" |
@@ -343,6 +346,7 @@ Before finalizing any report, scan the markdown for:
 5. **Real URLs**: Every URL in Steps to Reproduce must be a real tested URL, never a placeholder like `https://[domain]` or `https://target.com`.
 6. **Screenshot references**: At least one `![` image embed referencing a real file. Zero = BLOCK.
 7. **Verified commands**: Every command (`curl`, HTTP request, script invocation) in the report must have been executed and confirmed working before inclusion. Never write commands from memory.
+8. **No em dash**: scan the markdown for the `—` character. Any occurrence = rewrite using a comma, colon, parentheses, or " - ". Never emit `—`.
 
 ---
 

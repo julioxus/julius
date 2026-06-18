@@ -120,6 +120,7 @@ Even for internal DefectDojo reports, writing quality matters. Reports that read
 - **Internal DD reports use IMPERSONAL voice — NOT first person** (no "I found"). First person is for external bounty submissions only. Steps to Reproduce: instructional style ("Send this request", "Open the page").
 - Be direct — state the vulnerability, the evidence, the impact. No filler.
 - NO AI phrases: "This report details", "It's important to note", "leveraging", "poses a significant risk", "Furthermore", "Additionally"
+- **NEVER use the em dash character `—` (strong AI tell). Use a comma, colon, parentheses, or " - " instead. Hard rule, all output.**
 - NO defining known concepts: reviewers know what SSRF is
 - Keep body concise — every sentence must add information
 - **Explain in plain language — describe behavior, not implementation**: minimize source-code snippets and `file:line`/symbol citations in Description/Impact (describe the data flow in words). Keep a single short "where in code" line or save specifics for Mitigation. One small snippet is fine when it's the clearest way to show the flaw; a wall of Go/code is not. (For SAST findings, `file_path`/`line` already live in the frontmatter.)
@@ -259,6 +260,7 @@ After all reports are written locally, run a **self-review pass** before present
 
 5. WRITING QUALITY — Anti-AI check (see `/bounty-validation` Report Writing Quality Gate):
    - [ ] Impersonal voice in Description/Impact (NOT first person — internal DD) — Steps to Reproduce use instructional style
+   - [ ] No em dash `—` anywhere (use comma/colon/parentheses/" - ")
    - [ ] No banned AI phrases: "This report details", "It's important to note", "leveraging", "poses a significant risk", "could potentially", "Furthermore/Additionally" at sentence start
    - [ ] No filler — every sentence adds information. If removing it loses nothing, delete it.
    - [ ] No defining known security concepts (reviewers know what SSRF means)
