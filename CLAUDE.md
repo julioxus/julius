@@ -37,13 +37,12 @@ IMPORTANT: Always follow these git workflows:
 - Example: `feat(pentest): add JWT testing agent`
 
 **Pull Requests:**
-- MUST link to issue: "Fixes #123" or "Closes #123"
-- Create issue BEFORE starting work
-- Use PR template in `.github/pull_request_template.md`
+- Issues are DISABLED on this repo: state the motivation in the PR body, never write "Closes #123"
+- Fill in every section of `.github/pull_request_template.md`
 
 ## Common Workflows
 
-**New skill**: `/skiller` (recommended) or manual: `gh issue create` → `git checkout -b feature/skill-name` → build → commit → PR linking issue.
+**New skill**: `/skiller` (recommended) or manual: `git checkout -b feature/skill-name` → build → commit → PR.
 
 **Output**: Results go to local files per `.claude/OUTPUT_STANDARDS.md` while the DB backend is decommissioned.
 
