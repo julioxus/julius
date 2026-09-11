@@ -438,6 +438,8 @@ claude .
 
 ### Environment setup
 
+The MCP servers in `.mcp.json` run from the repository root using relative paths. The Bounty Intel server runs under `python3` by default; set `BOUNTY_INTEL_PYTHON` to the interpreter of your virtualenv if you use one, for example `export BOUNTY_INTEL_PYTHON=$PWD/.venv/bin/python`.
+
 ```bash
 # .env — Required for Bounty Intel API access (MCP server reads these)
 # The previous deployment was decommissioned; point this at your own redeployment.
