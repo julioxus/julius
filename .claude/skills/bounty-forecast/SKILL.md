@@ -52,7 +52,7 @@ Bugcrowd's public `api.bugcrowd.com` is **program-owner only**; researchers do n
 
 ### Bounty Intel API
 - `BOUNTY_INTEL_API_KEY` in `.env` — for admin endpoints (refresh statuses, backfill)
-- Dashboard: https://bounty-dashboard-887002731862.europe-west1.run.app
+- Dashboard: decommissioned 2026-09-11, redeploy required
 
 ## Pipeline
 
@@ -115,7 +115,7 @@ resp = requests.post(f"{client.api_url}/api/v1/admin/refresh-program-statuses",
 This ensures:
 - **Complete data from all three platforms** — never proceed with partial data
 - **Fresh cookies** obtained automatically when needed via Playwright browser (Intigriti + Bugcrowd)
-- **Cookies pushed to Cloud Run server** so API-based syncs work
+- **Cookies pushed to the Bounty Intel server** so API-based syncs work (needs a running backend)
 - Submissions, payouts, and report statuses are up to date
 - Program statuses reflect current platform state (open/active/paused/closed)
 
@@ -174,11 +174,8 @@ Summarize to the user:
 7. **Key improvements** — actionable changes to increase acceptance rate
 
 ### Step 5: Open Dashboard (optional)
-The full interactive dashboard is live at:
-```
-https://bounty-dashboard-887002731862.europe-west1.run.app
-```
-Direct the user there for the full visual experience with drill-down into programs, findings, and reports.
+
+The interactive dashboard was decommissioned on 2026-09-11 along with the rest of the GCP stack. Skip this step unless the user has redeployed it, in which case use their own service URL.
 
 ## Reference
 

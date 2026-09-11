@@ -52,7 +52,7 @@ All engagement data is persisted via the **Bounty Intel MCP tools** (`bounty_*`)
 - `bounty_suggest_attacks(tech_stack=[...])` — get attack suggestions from hunt memory
 
 ### View reports before submission (dashboard):
-Reports are reviewed at https://bounty-dashboard-887002731862.europe-west1.run.app/reports — the user approves submission from the dashboard. NEVER submit directly to Bugcrowd without user approval via the dashboard.
+Report review used to happen on the Bounty Intel dashboard, which was decommissioned on 2026-09-11. Present the report to the user directly and get explicit approval. NEVER submit to Bugcrowd without it.
 
 ## Quick Start (Manual Mode)
 

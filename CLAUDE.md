@@ -15,15 +15,13 @@ Key directories (explore with `glob`/`ls` for full detail):
 - `.claude/agents/` — Specialized agents: orchestrator, executor, validator, DOM XSS, script-gen
 - `tools/` — `scope_checker.py`, `safety_rails.py`, installers
 
-## Bounty Intel API — Source of Truth
+## Bounty Intel API — DECOMMISSIONED
 
-**CRITICAL**: Always query `bounty_*` MCP tools first for any engagement context. This is the single source of truth — never rely on memory or local files.
+**STATUS (2026-09-11)**: GCP project `ultra-airway-261710` was deleted. Cloud SQL, the Cloud Run dashboard, the GCS evidence bucket and Secret Manager no longer exist. The `bounty_*` MCP tools and the old dashboard URL do NOT resolve — never present them as live or cite stored DB stats.
 
-**Access**: `bounty_*` MCP tools (auto-loaded via `.mcp.json`). Pattern: `bounty_{list|get|save|search|update|upload}_{programs|findings|evidence|submissions|payouts|reports|recon|attack_surface}`. Platform-specific: `bounty_search_{hackerone|intigriti|bugcrowd}_programs()`. Also: `bounty_suggest_attacks()`, `bounty_forecast()`, `bounty_get_stats()`.
+**Until redeployed**: write engagement output to local files following `.claude/OUTPUT_STANDARDS.md`, and never claim a finding was persisted to the DB.
 
-**Fallback**: `from bounty_intel.client import BountyIntelClient`
-
-**Dashboard**: https://bounty-dashboard-887002731862.europe-west1.run.app | **DB stats**: use `bounty_get_stats()` dynamically
+**Redeploy**: app code is intact (`bounty_intel/`, `Dockerfile`). A new GCP project, Cloud SQL instance and secrets must be provisioned first. See the Bounty Intel section of `README.md`.
 
 ## Git Conventions
 
@@ -47,7 +45,7 @@ IMPORTANT: Always follow these git workflows:
 
 **New skill**: `/skiller` (recommended) or manual: `gh issue create` → `git checkout -b feature/skill-name` → build → commit → PR linking issue.
 
-**Output**: All results go to Bounty Intel DB via API, not local files. See `.claude/OUTPUT_STANDARDS.md`.
+**Output**: Results go to local files per `.claude/OUTPUT_STANDARDS.md` while the DB backend is decommissioned.
 
 ## Critical Rules
 
