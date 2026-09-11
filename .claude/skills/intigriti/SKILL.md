@@ -36,7 +36,7 @@ All engagement data is persisted via the **Bounty Intel MCP tools** (`bounty_*`)
 - `bounty_suggest_attacks(tech_stack=[...])` — get attack suggestions from hunt memory
 
 ### View reports before submission:
-Reports are reviewed at https://bounty-dashboard-887002731862.europe-west1.run.app/reports — the user approves submission from the dashboard.
+Report review used to happen on the Bounty Intel dashboard, which was decommissioned on 2026-09-11. Present the report to the user directly and get explicit approval.
 
 ## Quick Start
 
@@ -202,7 +202,7 @@ Use `tools/report_validator.py` to validate.
 
 ## Output Structure
 
-**PRIMARY**: All findings, reports, and engagement data stored in the **Bounty Intel database** via `bounty_*` MCP tools. Dashboard at `https://bounty-dashboard-887002731862.europe-west1.run.app` for review and approval.
+**PRIMARY**: findings, reports, and engagement data were stored in the **Bounty Intel database** via `bounty_*` MCP tools. That backend was decommissioned on 2026-09-11, so write to local files per `.claude/OUTPUT_STANDARDS.md` until it is redeployed.
 
 **SECONDARY** (ephemeral only): Temp directory during active testing.
 
@@ -323,7 +323,7 @@ def write_finding_file(engagement_name: str, finding_id: str, filename: str, con
 - `/authenticating` skill - Auth bypass, 2FA, CAPTCHA testing
 - `dom-xss-scanner` agent - Automated DOM XSS via Playwright (auto for JS targets)
 - **Utility agents**: `patt-fetcher`, `script-generator`, `pentester-validator`
-- **Dashboard**: https://bounty-dashboard-887002731862.europe-west1.run.app — report review + approval
+- **Dashboard**: decommissioned 2026-09-11, approve reports with the user directly
 
 ## Usage
 

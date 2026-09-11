@@ -1,15 +1,15 @@
 {
   "mcpServers": {
     "bounty-intel": {
-      "command": "/Users/jmartinez/repos/julius/.venv/bin/python",
+      "command": "${BOUNTY_INTEL_PYTHON:-python3}",
       "args": [
-        "/Users/jmartinez/repos/julius/bounty_intel/mcp_server.py"
+        "./bounty_intel/mcp_server.py"
       ],
-      "description": "Bounty Intel - Bug bounty operations: programs, findings, reports, recon, submissions, payouts, hunt memory, forecasts",
+      "description": "Bounty Intel - Bug bounty operations: programs, findings, reports, recon, submissions, payouts, hunt memory, forecasts. Requires a running Bounty Intel backend (BOUNTY_INTEL_API_URL); the original deployment was decommissioned 2026-09-11.",
       "timeout": 60
     },
     "burp": {
-      "command": "/Users/jmartinez/repos/julius/tools/burp/run_burp_mcp.sh",
+      "command": "./tools/burp/run_burp_mcp.sh",
       "description": "Burp Suite MCP bridge via local SSE endpoint and stdio proxy",
       "timeout": 60
     }

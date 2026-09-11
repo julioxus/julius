@@ -1,7 +1,10 @@
 """HTTP client for the Bounty Intel API.
 
-All operations go through the REST API served by the Cloud Run dashboard.
+All operations go through the REST API served by the Bounty Intel dashboard.
 No direct database access — the API server handles all DB interaction.
+
+The previous deployment was decommissioned on 2026-09-11, so there is no
+default endpoint any more: set BOUNTY_INTEL_API_URL to your own deployment.
 
 Usage:
     from bounty_intel.client import BountyIntelClient
@@ -18,14 +21,21 @@ import requests
 
 from bounty_intel.config import settings
 
-DEFAULT_API_URL = "https://bounty-dashboard-887002731862.europe-west1.run.app"
+# No default endpoint: the original Cloud Run deployment was decommissioned.
+# Set BOUNTY_INTEL_API_URL in .env to point at your own Bounty Intel server.
 
 
 class BountyIntelClient:
     """HTTP client for the Bounty Intel REST API."""
 
     def __init__(self, api_url: str | None = None, api_key: str | None = None):
-        self.api_url = (api_url or settings.bounty_intel_api_url or DEFAULT_API_URL).rstrip("/")
+        self.api_url = (api_url or settings.bounty_intel_api_url).rstrip("/")
+        if not self.api_url:
+            raise ValueError(
+                "BOUNTY_INTEL_API_URL not set. The original deployment was "
+                "decommissioned; point this at your own server in .env:\n"
+                "  BOUNTY_INTEL_API_URL=https://<your-service>.run.app"
+            )
         self.api_key = api_key or settings.bounty_intel_api_key
         if not self.api_key:
             raise ValueError(

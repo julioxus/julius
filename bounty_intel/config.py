@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     api_key: str = ""  # for programmatic /api/ access from skills
 
     # API mode (for skills running locally — set this to use HTTP instead of direct DB)
-    bounty_intel_api_url: str = ""  # e.g. "https://bounty-dashboard-887002731862.europe-west1.run.app"
+    bounty_intel_api_url: str = ""  # e.g. "https://<your-service>.run.app" (no default: old deployment is gone)
     bounty_intel_api_key: str = ""  # API key for auth
 
     # Platform API credentials

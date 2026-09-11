@@ -58,22 +58,24 @@ Built on top of [Transilience AI Community Tools](https://github.com/transilienc
 | **9 agent prompts** | Orchestrator, executor, validator, DOM XSS scanner, script generator, payload fetcher, HackerOne intel fetcher, HackTheBox, skill creator |
 | **186 attack docs** | PortSwigger Academy solutions, cheat sheets, methodology guides |
 | **2 bug bounty platforms** | HackerOne, Intigriti (with autopilot mode) |
-| **Bounty Intel dashboard** | Cloud Run web app — programs, findings, reports, submissions, forecast, hunt memory |
+| **Bounty Intel dashboard** | Cloud Run web app (DECOMMISSIONED 2026-09-11, code intact, redeploy required) |
 | **Vulnerability management** | DefectDojo orchestrator (scope analysis, SAST/DAST via /pentest, API import) |
 | **Vendor assessment** | Non-intrusive third-party security evaluation (DNS, supply chain, SAST, compliance) |
 | **Safety tools** | Deterministic scope checker, circuit breaker + rate limiter, cross-target hunt memory |
-| **MCP server** | 36 `bounty_*` tools auto-loaded — programs, findings, reports, evidence, payouts, hunt memory, forecast |
+| **MCP server** | 36 `bounty_*` tools, programs to forecasts (requires a running Bounty Intel backend) |
 | **Tool integrations** | Burp Suite MCP, HexStrike AI (150+ tools), Playwright, Kali toolset, RecoX |
 
 ---
 
 ## Bounty Intel — Operations Center
 
-All operational data lives in a **PostgreSQL database** (Cloud SQL) served by a **FastAPI dashboard on Cloud Run**. A **MCP server** (`bounty-intel`) auto-loads 36 tools when Claude starts in this project, making all operations naturally available without explicit instructions. Skills and agents use these `bounty_*` MCP tools as the single source of truth — no local files.
+> **Status: decommissioned on 2026-09-11.** The GCP project `ultra-airway-261710` was deleted, taking with it the Cloud SQL database, the Cloud Run dashboard, the GCS evidence bucket and the Secret Manager entries. The old dashboard URL no longer resolves and the `bounty_*` MCP tools cannot reach a backend. The application code in `bounty_intel/` is intact and can be redeployed against a fresh GCP project. Until then, skills write output to local files following `.claude/OUTPUT_STANDARDS.md`.
 
-**Dashboard URL**: `https://bounty-dashboard-887002731862.europe-west1.run.app`
+The design was as follows. All operational data lived in a **PostgreSQL database** (Cloud SQL) served by a **FastAPI dashboard on Cloud Run**. An **MCP server** (`bounty-intel`) auto-loads 36 tools when Claude starts in this project. Skills and agents used these `bounty_*` MCP tools as the single source of truth, with no local files.
 
 ### Features
+
+The counts below reflect the database contents at the time it was decommissioned. They are historical, not live.
 
 | Feature | Description |
 |---------|-------------|
@@ -132,16 +134,18 @@ Dashboard (web UI, 12 pages)
 
 | Component | Details |
 |-----------|---------|
-| **Cloud SQL** | PostgreSQL, europe-west1, 12 tables |
-| **Cloud Run** | bounty-dashboard, Google OAuth + API key auth |
-| **GCS** | julius-bounty-evidence (binary evidence storage) |
-| **Secret Manager** | DB password, API keys, OAuth creds |
+| **Cloud SQL** | PostgreSQL, europe-west1, 12 tables (deleted) |
+| **Cloud Run** | bounty-dashboard, Google OAuth + API key auth (deleted) |
+| **GCS** | julius-bounty-evidence (deleted) |
+| **Secret Manager** | DB password, API keys, OAuth creds (deleted) |
+
+None of the above exists any more. Recreating the stack means provisioning a new GCP project, a Cloud SQL instance, a GCS bucket and the secrets, then deploying as below.
 
 ### Deployment
 
 ```bash
 # Deploy dashboard to Cloud Run (must use repo root as source for Dockerfile)
-gcloud run deploy bounty-dashboard --source . --region europe-west1 --project ultra-airway-261710
+gcloud run deploy bounty-dashboard --source . --region europe-west1 --project <your-gcp-project>
 ```
 
 > **Important**: Always deploy from the repo root (`--source .`), not from `bounty_intel/web/`. The Dockerfile at the root installs the full `bounty-intel` package with all dependencies.
@@ -349,7 +353,7 @@ julius/
 ├── AGENTS.md                        # Passive knowledge base (always loaded)
 ├── CLAUDE.md                        # Repository instructions
 ├── .mcp.json                        # MCP server auto-start config
-├── bounty_intel/                    # Bounty Intel ops center (Cloud Run app)
+├── bounty_intel/                    # Bounty Intel ops center (Cloud Run app, not deployed)
 │   ├── mcp_server.py                # MCP server (36 tools, FastMCP)
 │   ├── db.py                        # SQLAlchemy models (12 tables)
 │   ├── service.py                   # Database service layer (CRUD)
@@ -434,9 +438,12 @@ claude .
 
 ### Environment setup
 
+The MCP servers in `.mcp.json` run from the repository root using relative paths. The Bounty Intel server runs under `python3` by default; set `BOUNTY_INTEL_PYTHON` to the interpreter of your virtualenv if you use one, for example `export BOUNTY_INTEL_PYTHON=$PWD/.venv/bin/python`.
+
 ```bash
 # .env — Required for Bounty Intel API access (MCP server reads these)
-BOUNTY_INTEL_API_URL=https://bounty-dashboard-887002731862.europe-west1.run.app
+# The previous deployment was decommissioned; point this at your own redeployment.
+BOUNTY_INTEL_API_URL=https://<your-cloud-run-service>.run.app
 BOUNTY_INTEL_API_KEY=<your-api-key>
 
 # Platform credentials (for sync)

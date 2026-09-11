@@ -38,7 +38,7 @@ All engagement data is persisted via the **Bounty Intel MCP tools** (`bounty_*`)
 - `bounty_suggest_attacks(tech_stack=[...])` — get attack suggestions from hunt memory
 
 ### View reports before submission (dashboard):
-Reports are reviewed at https://bounty-dashboard-887002731862.europe-west1.run.app/reports — the user approves submission from the dashboard. NEVER submit directly to HackerOne without user approval via the dashboard.
+Report review used to happen on the Bounty Intel dashboard, which was decommissioned on 2026-09-11. Present the report to the user directly and get explicit approval. NEVER submit to HackerOne without it.
 
 ## Quick Start
 
@@ -183,7 +183,7 @@ Use `tools/report_validator.py` to validate (includes anti-AI pattern checks).
 
 ## Output Structure
 
-**PRIMARY**: All findings, reports, and engagement data are stored in the **Bounty Intel database** via `bounty_*` MCP tools. The dashboard at `https://bounty-dashboard-887002731862.europe-west1.run.app` is the operations center for reviewing and approving submissions.
+**PRIMARY**: findings, reports, and engagement data were stored in the **Bounty Intel database** via `bounty_*` MCP tools. That backend was decommissioned on 2026-09-11, so write to local files per `.claude/OUTPUT_STANDARDS.md` until it is redeployed.
 
 **SECONDARY** (ephemeral only): A temporary local directory `outputs/hackerone-{program}/` can be used for artifacts during active testing (tool output, temp files), but nothing should persist there long-term. All validated findings and reports MUST be saved to the database.
 
@@ -301,7 +301,7 @@ def write_finding_file(engagement_name: str, finding_id: str, filename: str, con
 - `/authenticating` skill - Auth bypass, 2FA, CAPTCHA testing
 - `dom-xss-scanner` agent - Automated DOM XSS via Playwright (auto for JS targets)
 - **Utility agents**: `patt-fetcher`, `script-generator`, `pentester-validator`
-- **Dashboard**: https://bounty-dashboard-887002731862.europe-west1.run.app — report review + approval
+- **Dashboard**: decommissioned 2026-09-11, approve reports with the user directly
 
 ## Integration
 
